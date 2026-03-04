@@ -59,19 +59,48 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
         val labelBytes = bpb.copyOfRange(0x2B, 0x2B + 11)
         val label = String(labelBytes).trim()
 
+        // Log raw BPB bytes for debugging
+        val bpbHex = bpb.copyOfRange(0, 64).joinToString(" ") { "%02X".format(it) }
+        AppLog.d("BPB raw (0-63): $bpbHex")
+
         AppLog.i("FAT reader: $fatType, label=\"$label\", " +
                 "bytesPerSector=$bytesPerSector, sectorsPerCluster=$sectorsPerCluster, " +
                 "clusterSize=$clusterSize, clusters=$clusterCount")
+        AppLog.d("FAT layout: reservedSectors=$reservedSectors, numFATs=$numberOfFats, " +
+                "sectorsPerFat=$sectorsPerFat, rootEntries=$rootEntryCount")
+        AppLog.d("FAT offsets: fatStart=$fatStartByte, rootDirStart=$rootDirStartByte, " +
+                "dataStart=$dataStartByte")
     }
 
     fun listRootFiles(filter: String, matchesFilter: (String, String) -> Boolean): List<FatFsFile> {
         val result = mutableListOf<FatFsFile>()
+
+        // Debug: probe several offsets to find the actual root directory
+        val probeOffsets = listOf(0L, 512L, 1024L, 2048L, 2560L, 4096L, 8192L, 8704L)
+        for (probe in probeOffsets) {
+            try {
+                val probeData = readBytes(probe, 32)
+                val hex = probeData.joinToString(" ") { "%02X".format(it) }
+                val ascii = String(probeData.copyOfRange(0, 11)).replace(Regex("[^\\x20-\\x7E]"), ".")
+                AppLog.d("Probe @$probe: $hex  ascii=\"$ascii\"")
+            } catch (e: Exception) {
+                AppLog.d("Probe @$probe: ERROR ${e.message}")
+            }
+        }
+
         val rootDirBytes = readBytes(rootDirStartByte, rootEntryCount * 32)
+
+        // Log first 64 raw bytes of root directory for debugging
+        val hexDump = rootDirBytes.take(64).joinToString(" ") { "%02X".format(it) }
+        AppLog.d("Root dir raw (first 64 bytes): $hexDump")
 
         for (i in 0 until rootEntryCount) {
             val offset = i * 32
             val firstByte = rootDirBytes[offset].toInt() and 0xFF
-            if (firstByte == 0x00) break // no more entries
+            if (firstByte == 0x00) {
+                AppLog.d("End-of-directory marker at entry $i")
+                break // no more entries
+            }
             if (firstByte == 0xE5) continue // deleted entry
             val attr = rootDirBytes[offset + 11].toInt() and 0xFF
             if (attr and 0x0F == 0x0F) continue // LFN entry
@@ -82,17 +111,26 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
             val fileSize = u32(rootDirBytes, offset + 28)
             val startCluster = u16(rootDirBytes, offset + 26)
 
-            if (!isDir && matchesFilter(name, filter)) {
-                result.add(FatFsFile(
-                    name = name,
-                    relativePath = name,
-                    length = fileSize,
-                    isDirectory = false,
-                    startCluster = startCluster,
-                    reader = this
-                ))
+            AppLog.d("  entry: \"$name\" ${if (isDir) "[DIR]" else "${fileSize}b"} attr=0x${attr.toString(16)} cluster=$startCluster")
+
+            if (!isDir) {
+                val matches = matchesFilter(name, filter)
+                if (matches) {
+                    AppLog.d("    -> MATCHES filter \"$filter\"")
+                    result.add(FatFsFile(
+                        name = name,
+                        relativePath = name,
+                        length = fileSize,
+                        isDirectory = false,
+                        startCluster = startCluster,
+                        reader = this
+                    ))
+                } else {
+                    AppLog.d("    -> skipped (doesn't match \"$filter\")")
+                }
             }
         }
+        AppLog.i("Root dir scan: ${result.size} file(s) matched filter \"$filter\"")
         return result
     }
 
@@ -249,13 +287,23 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
         val offsetInBlock = (byteOffset % blockSize).toInt()
         val blocksNeeded = ((offsetInBlock + count + blockSize - 1) / blockSize)
 
-        val buffer = ByteBuffer.allocate(blocksNeeded * blockSize)
-        driver.read(startBlock * blockSize, buffer)
-        buffer.flip()
+        // Read in chunks of max 32 blocks (16KB) to avoid USB transfer failures
+        // on devices that can't handle large SCSI READ commands
+        val maxBlocksPerRead = 32
+        val fullBuffer = ByteArray(blocksNeeded * blockSize)
+        var blocksRead = 0
+
+        while (blocksRead < blocksNeeded) {
+            val remaining = blocksNeeded - blocksRead
+            val toRead = minOf(remaining, maxBlocksPerRead)
+            val chunkBuffer = ByteBuffer.allocate(toRead * blockSize)
+            driver.read(startBlock + blocksRead, chunkBuffer)
+            System.arraycopy(chunkBuffer.array(), 0, fullBuffer, blocksRead * blockSize, toRead * blockSize)
+            blocksRead += toRead
+        }
 
         val result = ByteArray(count)
-        buffer.position(offsetInBlock)
-        buffer.get(result)
+        System.arraycopy(fullBuffer, offsetInBlock, result, 0, count)
         return result
     }
 

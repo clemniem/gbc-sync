@@ -6,7 +6,17 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(gradle wrapper:*)",
       "Bash(./gradlew assembleDebug:*)",
-      "Bash(gh run:*)"
+      "Bash(gh run:*)",
+      "Bash(diskutil list:*)",
+      "Bash(diskutil info:*)",
+      "Bash(dd:*)",
+      "Bash(diskutil unmount:*)",
+      "Bash(~/Library/Android/sdk/platform-tools/adb logcat:*)",
+      "Bash(~/Library/Android/sdk/platform-tools/adb install:*)",
+      "Bash(jar tf:*)",
+      "Bash(jar xf:*)",
+      "Bash(adb devices:*)",
+      "Bash(/usr/bin/grep:*)"
     ]
   }
 }

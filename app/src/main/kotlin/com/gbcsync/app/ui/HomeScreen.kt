@@ -218,17 +218,31 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                 )
             }
 
+            if (syncState.status == SyncState.Status.CONNECTING) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
             if (syncState.status == SyncState.Status.SYNCING) {
                 Spacer(modifier = Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = { syncState.progress },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "${syncState.filesCopied}/${syncState.totalFiles}: ${syncState.currentFile}",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                if (syncState.totalFiles > 0) {
+                    LinearProgressIndicator(
+                        progress = { syncState.progress },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "${syncState.filesCopied}/${syncState.totalFiles}: ${syncState.currentFile}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = syncState.currentFile,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
 
             if (syncState.status == SyncState.Status.ERROR ||

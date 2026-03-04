@@ -7,10 +7,10 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Minimal read-only FAT12/16 reader that works directly with libaums BlockDeviceDriver.
- * Handles unsigned bytes correctly (unlike fat32-lib which breaks on 128 sectors/cluster).
+ * Minimal read-only FAT12/16/32 reader that works directly with libaums BlockDeviceDriver.
+ * Handles unsigned bytes correctly and bypasses libaums's SCSI INQUIRY requirement.
  */
-class Fat12Reader(private val driver: BlockDeviceDriver) {
+class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBlockOffset: Long = 0) {
 
     // Boot sector fields (all unsigned)
     val bytesPerSector: Int
@@ -19,12 +19,13 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
     val numberOfFats: Int
     val rootEntryCount: Int
     val totalSectors: Long
-    val sectorsPerFat: Int
+    val sectorsPerFat: Long
     val fatType: String
+    private val fat32RootCluster: Int
 
     private val clusterSize: Int
     private val fatStartByte: Long
-    private val rootDirStartByte: Long
+    private val rootDirStartByte: Long // only used for FAT12/16
     private val dataStartByte: Long
 
     init {
@@ -36,7 +37,10 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
         numberOfFats = u8(bpb, 0x10)
         rootEntryCount = u16(bpb, 0x11)
         val totalSectors16 = u16(bpb, 0x13)
-        sectorsPerFat = u16(bpb, 0x16)
+        val fatSz16 = u16(bpb, 0x16)
+        val fatSz32 = u32(bpb, 0x24)
+        sectorsPerFat = if (fatSz16 != 0) fatSz16.toLong() else fatSz32
+        fat32RootCluster = if (fatSz16 == 0) u32(bpb, 0x2C).toInt() else 0
         val totalSectors32 = u32(bpb, 0x20)
         totalSectors = if (totalSectors16 != 0) totalSectors16.toLong() else totalSectors32
 
@@ -56,7 +60,8 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
         }
 
         // Read filesystem label from boot sector
-        val labelBytes = bpb.copyOfRange(0x2B, 0x2B + 11)
+        val labelOffset = if (fatType == "FAT32") 0x47 else 0x2B
+        val labelBytes = bpb.copyOfRange(labelOffset, labelOffset + 11)
         val label = String(labelBytes).trim()
 
         // Log raw BPB bytes for debugging
@@ -75,33 +80,26 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
     fun listRootFiles(filter: String, matchesFilter: (String, String) -> Boolean): List<FatFsFile> {
         val result = mutableListOf<FatFsFile>()
 
-        // Debug: probe several offsets to find the actual root directory
-        val probeOffsets = listOf(0L, 512L, 1024L, 2048L, 2560L, 4096L, 8192L, 8704L)
-        for (probe in probeOffsets) {
-            try {
-                val probeData = readBytes(probe, 32)
-                val hex = probeData.joinToString(" ") { "%02X".format(it) }
-                val ascii = String(probeData.copyOfRange(0, 11)).replace(Regex("[^\\x20-\\x7E]"), ".")
-                AppLog.d("Probe @$probe: $hex  ascii=\"$ascii\"")
-            } catch (e: Exception) {
-                AppLog.d("Probe @$probe: ERROR ${e.message}")
-            }
+        val rootDirBytes: ByteArray
+        val entryCount: Int
+
+        if (fatType == "FAT32") {
+            // FAT32: root directory is a cluster chain starting at fat32RootCluster
+            rootDirBytes = readClusterChain(fat32RootCluster)
+            entryCount = rootDirBytes.size / 32
+            AppLog.d("FAT32 root dir: ${rootDirBytes.size} bytes from cluster $fat32RootCluster ($entryCount entries)")
+        } else {
+            // FAT12/16: root directory is at a fixed location
+            rootDirBytes = readBytes(rootDirStartByte, rootEntryCount * 32)
+            entryCount = rootEntryCount
         }
 
-        val rootDirBytes = readBytes(rootDirStartByte, rootEntryCount * 32)
-
-        // Log first 64 raw bytes of root directory for debugging
-        val hexDump = rootDirBytes.take(64).joinToString(" ") { "%02X".format(it) }
-        AppLog.d("Root dir raw (first 64 bytes): $hexDump")
-
-        for (i in 0 until rootEntryCount) {
+        for (i in 0 until entryCount) {
             val offset = i * 32
+            if (offset + 32 > rootDirBytes.size) break
             val firstByte = rootDirBytes[offset].toInt() and 0xFF
-            if (firstByte == 0x00) {
-                AppLog.d("End-of-directory marker at entry $i")
-                break // no more entries
-            }
-            if (firstByte == 0xE5) continue // deleted entry
+            if (firstByte == 0x00) break
+            if (firstByte == 0xE5) continue
             val attr = rootDirBytes[offset + 11].toInt() and 0xFF
             if (attr and 0x0F == 0x0F) continue // LFN entry
             if (attr and 0x08 != 0) continue // volume label
@@ -109,25 +107,19 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
             val name = parseDosName(rootDirBytes, offset)
             val isDir = attr and 0x10 != 0
             val fileSize = u32(rootDirBytes, offset + 28)
-            val startCluster = u16(rootDirBytes, offset + 26)
+            val startCluster = getEntryStartCluster(rootDirBytes, offset)
 
             AppLog.d("  entry: \"$name\" ${if (isDir) "[DIR]" else "${fileSize}b"} attr=0x${attr.toString(16)} cluster=$startCluster")
 
-            if (!isDir) {
-                val matches = matchesFilter(name, filter)
-                if (matches) {
-                    AppLog.d("    -> MATCHES filter \"$filter\"")
-                    result.add(FatFsFile(
-                        name = name,
-                        relativePath = name,
-                        length = fileSize,
-                        isDirectory = false,
-                        startCluster = startCluster,
-                        reader = this
-                    ))
-                } else {
-                    AppLog.d("    -> skipped (doesn't match \"$filter\")")
-                }
+            if (!isDir && matchesFilter(name, filter)) {
+                result.add(FatFsFile(
+                    name = name,
+                    relativePath = name,
+                    length = fileSize,
+                    isDirectory = false,
+                    startCluster = startCluster,
+                    reader = this
+                ))
             }
         }
         AppLog.i("Root dir scan: ${result.size} file(s) matched filter \"$filter\"")
@@ -136,51 +128,20 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
 
     fun listFilesRecursive(filter: String, matchesFilter: (String, String) -> Boolean): List<FatFsFile> {
         val result = mutableListOf<FatFsFile>()
-        listDirRecursive(rootDirStartByte, rootEntryCount, "", filter, matchesFilter, result, isRoot = true)
-        return result
-    }
 
-    private fun listDirRecursive(
-        dirByteOffset: Long, entryCount: Int, pathPrefix: String,
-        filter: String, matchesFilter: (String, String) -> Boolean,
-        result: MutableList<FatFsFile>, isRoot: Boolean
-    ) {
-        val dirBytes = readBytes(dirByteOffset, entryCount * 32)
-        for (i in 0 until entryCount) {
-            val offset = i * 32
-            val firstByte = dirBytes[offset].toInt() and 0xFF
-            if (firstByte == 0x00) break
-            if (firstByte == 0xE5) continue
-            val attr = dirBytes[offset + 11].toInt() and 0xFF
-            if (attr and 0x0F == 0x0F) continue
-            if (attr and 0x08 != 0) continue
+        val rootDirBytes: ByteArray
+        val entryCount: Int
 
-            val name = parseDosName(dirBytes, offset)
-            val isDir = attr and 0x10 != 0
-            val fileSize = u32(dirBytes, offset + 28)
-            val startCluster = u16(dirBytes, offset + 26)
-
-            if (name == "." || name == "..") continue
-
-            if (isDir) {
-                val subPath = if (pathPrefix.isEmpty()) name else "$pathPrefix/$name"
-                // Read subdirectory cluster chain
-                val subDirBytes = readClusterChain(startCluster)
-                val subEntryCount = subDirBytes.size / 32
-                // Write to temp position and recurse
-                listDirFromBytes(subDirBytes, subEntryCount, subPath, filter, matchesFilter, result)
-            } else if (matchesFilter(name, filter)) {
-                val relativePath = if (pathPrefix.isEmpty()) name else "$pathPrefix/$name"
-                result.add(FatFsFile(
-                    name = name,
-                    relativePath = relativePath,
-                    length = fileSize,
-                    isDirectory = false,
-                    startCluster = startCluster,
-                    reader = this
-                ))
-            }
+        if (fatType == "FAT32") {
+            rootDirBytes = readClusterChain(fat32RootCluster)
+            entryCount = rootDirBytes.size / 32
+        } else {
+            rootDirBytes = readBytes(rootDirStartByte, rootEntryCount * 32)
+            entryCount = rootEntryCount
         }
+
+        listDirFromBytes(rootDirBytes, entryCount, "", filter, matchesFilter, result)
+        return result
     }
 
     private fun listDirFromBytes(
@@ -201,19 +162,20 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
             val name = parseDosName(dirBytes, offset)
             val isDir = attr and 0x10 != 0
             val fileSize = u32(dirBytes, offset + 28)
-            val startCluster = u16(dirBytes, offset + 26)
+            val startCluster = getEntryStartCluster(dirBytes, offset)
 
             if (name == "." || name == "..") continue
 
             if (isDir) {
-                val subPath = "$pathPrefix/$name"
+                val subPath = if (pathPrefix.isEmpty()) name else "$pathPrefix/$name"
                 val subDirBytes = readClusterChain(startCluster)
                 val subEntryCount = subDirBytes.size / 32
                 listDirFromBytes(subDirBytes, subEntryCount, subPath, filter, matchesFilter, result)
             } else if (matchesFilter(name, filter)) {
+                val relativePath = if (pathPrefix.isEmpty()) name else "$pathPrefix/$name"
                 result.add(FatFsFile(
                     name = name,
-                    relativePath = "$pathPrefix/$name",
+                    relativePath = relativePath,
                     length = fileSize,
                     isDirectory = false,
                     startCluster = startCluster,
@@ -248,6 +210,7 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
         return when (fatType) {
             "FAT12" -> getNextClusterFat12(cluster)
             "FAT16" -> getNextClusterFat16(cluster)
+            "FAT32" -> getNextClusterFat32(cluster)
             else -> throw UnsupportedOperationException("$fatType not supported by this reader")
         }
     }
@@ -269,10 +232,17 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
         return u16(fatBytes, 0)
     }
 
+    private fun getNextClusterFat32(cluster: Int): Int {
+        val fatOffset = cluster.toLong() * 4
+        val fatBytes = readBytes(fatStartByte + fatOffset, 4)
+        return (u32(fatBytes, 0) and 0x0FFFFFFF).toInt()
+    }
+
     internal fun isEndOfChain(cluster: Int): Boolean {
         return when (fatType) {
             "FAT12" -> cluster >= 0x0FF8
             "FAT16" -> cluster >= 0xFFF8
+            "FAT32" -> (cluster and 0x0FFFFFFF) >= 0x0FFFFFF8
             else -> true
         }
     }
@@ -283,7 +253,7 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
 
     internal fun readBytes(byteOffset: Long, count: Int): ByteArray {
         val blockSize = driver.blockSize
-        val startBlock = byteOffset / blockSize
+        val startBlock = byteOffset / blockSize + partitionBlockOffset
         val offsetInBlock = (byteOffset % blockSize).toInt()
         val blocksNeeded = ((offsetInBlock + count + blockSize - 1) / blockSize)
 
@@ -308,6 +278,17 @@ class Fat12Reader(private val driver: BlockDeviceDriver) {
     }
 
     internal val clusterSizeBytes: Int get() = clusterSize
+
+    /** Get start cluster from directory entry. FAT32 uses high 16 bits at offset+20. */
+    private fun getEntryStartCluster(data: ByteArray, offset: Int): Int {
+        val lo = u16(data, offset + 26)
+        return if (fatType == "FAT32") {
+            val hi = u16(data, offset + 20)
+            (hi shl 16) or lo
+        } else {
+            lo
+        }
+    }
 
     private fun parseDosName(data: ByteArray, offset: Int): String {
         val name = String(data, offset, 8).trim()

@@ -13,6 +13,7 @@ import com.gbcsync.app.data.SyncLogEntry
 import com.gbcsync.app.data.SyncRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -31,6 +32,7 @@ data class SyncState(
     val currentFile: String = "",
     val filesCopied: Int = 0,
     val totalFiles: Int = 0,
+    val errors: Int = 0,
     val error: String? = null
 ) {
     enum class Status { IDLE, CONNECTING, SYNCING, DONE, ERROR }
@@ -45,8 +47,9 @@ class UsbDeviceManager(
     private val scope: CoroutineScope
 ) {
     companion object {
-        private const val TAG = "UsbDeviceManager"
         const val ACTION_USB_PERMISSION = "com.gbcsync.app.USB_PERMISSION"
+        private const val MAX_INIT_RETRIES = 3
+        private const val INIT_RETRY_DELAY_MS = 1000L
     }
 
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
@@ -93,13 +96,17 @@ class UsbDeviceManager(
     fun unregister() {
         try {
             context.unregisterReceiver(usbReceiver)
-        } catch (_: IllegalArgumentException) {
-            // Already unregistered
-        }
+        } catch (_: IllegalArgumentException) {}
     }
 
     fun onUsbDeviceAttached() {
         AppLog.i("USB device attached event received")
+        scope.launch(Dispatchers.IO) { detectAndSync() }
+    }
+
+    /** Manual retry - can be called from UI */
+    fun retrySync() {
+        AppLog.i("Manual sync retry requested")
         scope.launch(Dispatchers.IO) { detectAndSync() }
     }
 
@@ -132,7 +139,7 @@ class UsbDeviceManager(
                     PendingIntent.FLAG_MUTABLE
                 )
                 usbManager.requestPermission(usbDevice, permissionIntent)
-                return // Will continue in receiver callback
+                return
             }
 
             startSync()
@@ -141,14 +148,12 @@ class UsbDeviceManager(
     }
 
     private fun findMatchingConfig(usbDevice: UsbDevice, configs: List<DeviceConfig>): DeviceConfig? {
-        // First try exact vendor/product ID match
         for (config in configs) {
             if (config.vendorId != 0 && config.productId != 0 &&
                 config.vendorId == usbDevice.vendorId && config.productId == usbDevice.productId) {
                 return config
             }
         }
-        // If no exact match, use first config with unset IDs (0/0) as fallback
         return configs.firstOrNull { it.vendorId == 0 && it.productId == 0 }
     }
 
@@ -159,10 +164,36 @@ class UsbDeviceManager(
         val configs = repository.deviceConfigs.first()
 
         for (storageDevice in massStorageDevices) {
-            try {
-                AppLog.d("Initializing storage device...")
-                storageDevice.init()
+            var initSuccess = false
 
+            // Retry device init - libaums can fail with "Max Recovery attempts"
+            for (attempt in 1..MAX_INIT_RETRIES) {
+                try {
+                    AppLog.d("Initializing storage device (attempt $attempt/$MAX_INIT_RETRIES)...")
+                    storageDevice.init()
+                    initSuccess = true
+                    AppLog.d("Device initialized OK")
+                    break
+                } catch (e: Exception) {
+                    AppLog.w("Init attempt $attempt failed: ${e.message}")
+                    try { storageDevice.close() } catch (_: Exception) {}
+                    if (attempt < MAX_INIT_RETRIES) {
+                        AppLog.d("Waiting ${INIT_RETRY_DELAY_MS}ms before retry...")
+                        delay(INIT_RETRY_DELAY_MS)
+                    }
+                }
+            }
+
+            if (!initSuccess) {
+                AppLog.e("Failed to initialize device after $MAX_INIT_RETRIES attempts")
+                _syncState.value = SyncState(
+                    status = SyncState.Status.ERROR,
+                    error = "Failed to initialize USB device after $MAX_INIT_RETRIES attempts. Try unplugging and re-plugging."
+                )
+                return
+            }
+
+            try {
                 val config = findMatchingConfig(storageDevice.usbDevice, configs) ?: configs.firstOrNull() ?: continue
                 val destDir = repository.getDestDir(config)
                 val deviceName = config.name
@@ -173,9 +204,14 @@ class UsbDeviceManager(
                     deviceName = deviceName
                 )
 
-                val partition = storageDevice.partitions.firstOrNull() ?: continue
+                val partition = storageDevice.partitions.firstOrNull()
+                if (partition == null) {
+                    AppLog.e("No partitions found on device")
+                    continue
+                }
                 val fs = partition.fileSystem
                 val root = fs.rootDirectory
+                AppLog.d("Filesystem: ${fs.volumeLabel}, capacity=${fs.capacity}, chunkSize=${fs.chunkSize}")
 
                 // Collect files to copy
                 AppLog.d("Scanning files (filter=${config.fileFilter}, recursive=${config.recursive})...")
@@ -194,6 +230,7 @@ class UsbDeviceManager(
                 _syncState.value = _syncState.value.copy(totalFiles = newFiles.size)
 
                 if (newFiles.isEmpty()) {
+                    AppLog.i("All files up to date, nothing to copy")
                     _syncState.value = SyncState(
                         status = SyncState.Status.DONE,
                         deviceName = deviceName,
@@ -205,6 +242,7 @@ class UsbDeviceManager(
                 }
 
                 var copied = 0
+                var errors = 0
                 val chunkSize = fs.chunkSize
 
                 for ((usbFile, relativePath) in newFiles) {
@@ -218,27 +256,42 @@ class UsbDeviceManager(
                         copied++
                         AppLog.d("Copied $targetPath OK")
 
-                        repository.addSyncLogEntry(
-                            SyncLogEntry(
-                                fileName = targetPath,
-                                deviceName = deviceName,
-                                timestamp = System.currentTimeMillis(),
-                                fileSize = usbFile.length
+                        // Log to sync history
+                        try {
+                            repository.addSyncLogEntry(
+                                SyncLogEntry(
+                                    fileName = targetPath,
+                                    deviceName = deviceName,
+                                    timestamp = System.currentTimeMillis(),
+                                    fileSize = usbFile.length
+                                )
                             )
-                        )
+                        } catch (e: Exception) {
+                            AppLog.w("Failed to write sync log entry: ${e.message}")
+                        }
 
                         _syncState.value = _syncState.value.copy(filesCopied = copied)
                     } catch (e: Exception) {
+                        errors++
                         AppLog.e("Error copying $targetPath", e)
+                        _syncState.value = _syncState.value.copy(errors = errors)
+                        // Continue with next file instead of aborting
                     }
                 }
 
-                AppLog.i("Sync complete: $copied/${newFiles.size} file(s) copied")
+                val summary = buildString {
+                    append("Sync complete: $copied copied")
+                    if (errors > 0) append(", $errors failed")
+                }
+                AppLog.i(summary)
+
                 _syncState.value = SyncState(
-                    status = SyncState.Status.DONE,
+                    status = if (errors > 0 && copied == 0) SyncState.Status.ERROR else SyncState.Status.DONE,
                     deviceName = deviceName,
                     filesCopied = copied,
-                    totalFiles = newFiles.size
+                    totalFiles = newFiles.size,
+                    errors = errors,
+                    error = if (errors > 0) "$errors file(s) failed to copy" else null
                 )
 
                 storageDevice.close()
@@ -261,18 +314,22 @@ class UsbDeviceManager(
         recursive: Boolean,
         result: MutableList<Pair<UsbFile, String>>
     ) {
-        for (file in dir.listFiles()) {
-            if (file.isDirectory) {
-                if (recursive) {
-                    val subPath = if (pathPrefix.isEmpty()) file.name else "$pathPrefix/${file.name}"
-                    collectFiles(file, subPath, filter, recursive, result)
-                }
-            } else {
-                if (repository.matchesFilter(file.name, filter)) {
-                    val relativePath = if (pathPrefix.isEmpty()) file.name else "$pathPrefix/${file.name}"
-                    result.add(file to relativePath)
+        try {
+            for (file in dir.listFiles()) {
+                if (file.isDirectory) {
+                    if (recursive) {
+                        val subPath = if (pathPrefix.isEmpty()) file.name else "$pathPrefix/${file.name}"
+                        collectFiles(file, subPath, filter, recursive, result)
+                    }
+                } else {
+                    if (repository.matchesFilter(file.name, filter)) {
+                        val relativePath = if (pathPrefix.isEmpty()) file.name else "$pathPrefix/${file.name}"
+                        result.add(file to relativePath)
+                    }
                 }
             }
+        } catch (e: Exception) {
+            AppLog.e("Error listing directory $pathPrefix", e)
         }
     }
 
@@ -288,7 +345,6 @@ class UsbDeviceManager(
         destFile.parentFile?.mkdirs()
 
         FileOutputStream(destFile).use { fos ->
-            // Pre-allocate file size for performance
             fos.channel.truncate(0)
 
             val buffer = ByteArray(chunkSize)
@@ -301,7 +357,6 @@ class UsbDeviceManager(
             }
         }
 
-        // Preserve file length
         if (destFile.length() != usbFile.length) {
             AppLog.w("Size mismatch for $relativePath: expected ${usbFile.length}, got ${destFile.length()}")
         }

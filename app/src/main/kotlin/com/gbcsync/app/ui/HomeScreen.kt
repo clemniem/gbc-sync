@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.UsbOff
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,6 +60,7 @@ fun HomeScreen(
     syncLog: List<SyncLogEntry>,
     logLines: List<String>,
     debugLogEnabled: Boolean,
+    onRetrySync: () -> Unit,
     onNavigateToSettings: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(if (debugLogEnabled) 1 else 0) }
@@ -88,6 +90,7 @@ fun HomeScreen(
             // Connection Status
             ConnectionStatusCard(
                 connectedDevice, syncState,
+                onRetry = onRetrySync,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
@@ -167,7 +170,7 @@ private fun LiveLogTab(logLines: List<String>) {
 }
 
 @Composable
-private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState, modifier: Modifier = Modifier) {
+private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -201,7 +204,8 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                         SyncState.Status.CONNECTING -> "Connecting to ${syncState.deviceName}..."
                         SyncState.Status.SYNCING -> "Syncing from ${syncState.deviceName}..."
                         SyncState.Status.DONE -> when {
-                            syncState.filesCopied == 0 -> "All files up to date"
+                            syncState.filesCopied == 0 && syncState.errors == 0 -> "All files up to date"
+                            syncState.errors > 0 -> "Copied ${syncState.filesCopied}, ${syncState.errors} failed"
                             else -> "Done! Copied ${syncState.filesCopied} file(s)"
                         }
                         SyncState.Status.ERROR -> "Error: ${syncState.error}"
@@ -221,6 +225,14 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                     text = "${syncState.filesCopied}/${syncState.totalFiles}: ${syncState.currentFile}",
                     style = MaterialTheme.typography.bodySmall
                 )
+            }
+
+            if (syncState.status == SyncState.Status.ERROR ||
+                (syncState.status == SyncState.Status.DONE && syncState.errors > 0)) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = onRetry) {
+                    Text("Retry Sync")
+                }
             }
         }
     }

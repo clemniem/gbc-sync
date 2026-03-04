@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
                                 syncLog = syncLog,
                                 logLines = logLines,
                                 debugLogEnabled = debugLogEnabled,
+                                onRetrySync = { usbManager.retrySync() },
                                 onNavigateToSettings = { navController.navigate("settings") }
                             )
                         }

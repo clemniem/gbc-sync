@@ -21,10 +21,8 @@ import kotlinx.coroutines.launch
 import me.jahnen.libaums.core.UsbMassStorageDevice
 import me.jahnen.libaums.core.driver.BlockDeviceDriver
 import me.jahnen.libaums.core.fs.FileSystem
-import me.jahnen.libaums.core.fs.FileSystemFactory
 import me.jahnen.libaums.core.fs.UsbFile
 import me.jahnen.libaums.core.fs.UsbFileStreamFactory
-import me.jahnen.libaums.core.partition.PartitionTableEntry
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -109,7 +107,6 @@ class UsbDeviceManager(
         scope.launch(Dispatchers.IO) { detectAndSync() }
     }
 
-    /** Manual retry - can be called from UI */
     fun retrySync() {
         AppLog.i("Manual sync retry requested")
         scope.launch(Dispatchers.IO) { detectAndSync() }
@@ -169,23 +166,29 @@ class UsbDeviceManager(
         val configs = repository.deviceConfigs.first()
 
         for (storageDevice in massStorageDevices) {
-            var fs: FileSystem? = null
+            val config = findMatchingConfig(storageDevice.usbDevice, configs) ?: configs.firstOrNull() ?: continue
+            val destDir = repository.getDestDir(config)
+            val deviceName = config.name
 
-            // Try normal init (with partition table) first, then superfloppy fallback
+            // Try libaums native FAT32 first
+            var synced = false
             for (attempt in 1..MAX_INIT_RETRIES) {
                 try {
                     AppLog.d("Initializing storage device (attempt $attempt/$MAX_INIT_RETRIES)...")
                     storageDevice.init()
                     val partition = storageDevice.partitions.firstOrNull()
                     if (partition != null) {
-                        fs = partition.fileSystem
-                        AppLog.d("Partition filesystem: ${fs!!.volumeLabel}, capacity=${fs!!.capacity}")
+                        val fs = partition.fileSystem
+                        AppLog.i("libaums FAT32: ${fs.volumeLabel}, capacity=${fs.capacity}")
+                        syncWithLibaums(storageDevice, fs, config, destDir, deviceName)
+                        synced = true
+                        break
                     } else {
                         AppLog.w("No partitions found after init")
+                        break // Don't retry - partitions won't appear
                     }
-                    break
                 } catch (e: Exception) {
-                    AppLog.w("Init attempt $attempt failed: ${e.message}")
+                    AppLog.w("libaums init attempt $attempt failed: ${e.message}")
                     try { storageDevice.close() } catch (_: Exception) {}
                     if (attempt < MAX_INIT_RETRIES) {
                         delay(INIT_RETRY_DELAY_MS)
@@ -193,130 +196,38 @@ class UsbDeviceManager(
                 }
             }
 
-            // Superfloppy fallback: no partition table, FS at block 0
-            if (fs == null) {
-                AppLog.i("Trying superfloppy mode (no partition table)...")
-                try {
-                    val blockDevice = getBlockDevice(storageDevice)
-                    if (blockDevice != null) {
-                        val entry = PartitionTableEntry(0x0B, 0, blockDevice.blocks) // 0x0B = FAT32
-                        fs = FileSystemFactory.createFileSystem(entry, blockDevice)
-                        AppLog.d("Superfloppy filesystem: ${fs!!.volumeLabel}, capacity=${fs!!.capacity}")
-                    }
-                } catch (e: Exception) {
-                    AppLog.e("Superfloppy init failed", e)
-                }
-            }
+            if (synced) continue
 
-            if (fs == null) {
-                AppLog.e("Failed to access filesystem after all attempts")
+            // Fallback: use fat32-lib for FAT12/16/32 via block device
+            AppLog.i("Falling back to fat32-lib (supports FAT12/16/32)...")
+            val blockDevice = getBlockDevice(storageDevice)
+            if (blockDevice == null) {
+                AppLog.e("Cannot access block device")
                 _syncState.value = SyncState(
                     status = SyncState.Status.ERROR,
-                    error = "Cannot read filesystem. Try unplugging and re-plugging."
+                    error = "Cannot access USB device. Try unplugging and re-plugging."
                 )
                 try { storageDevice.close() } catch (_: Exception) {}
-                return
+                continue
             }
 
             try {
-                val config = findMatchingConfig(storageDevice.usbDevice, configs) ?: configs.firstOrNull() ?: continue
-                val destDir = repository.getDestDir(config)
-                val deviceName = config.name
-                AppLog.i("Syncing $deviceName -> ${destDir.absolutePath}")
-
-                _syncState.value = SyncState(
-                    status = SyncState.Status.SYNCING,
-                    deviceName = deviceName
-                )
-
-                val root = fs.rootDirectory
-                AppLog.d("chunkSize=${fs.chunkSize}")
-
-                // Collect files to copy
-                AppLog.d("Scanning files (filter=${config.fileFilter}, recursive=${config.recursive})...")
-                val filesToCopy = mutableListOf<Pair<UsbFile, String>>()
-                collectFiles(root, "", config.fileFilter, config.recursive, filesToCopy)
-                AppLog.d("Found ${filesToCopy.size} matching file(s) on device")
-
-                // Filter out already-synced files (.sav files always copy with timestamp)
-                val newFiles = filesToCopy.filter { (usbFile, relativePath) ->
-                    val fileName = if (relativePath.isNotEmpty()) relativePath else usbFile.name
-                    if (fileName.lowercase().endsWith(".sav")) true
-                    else repository.shouldCopyFile(fileName, usbFile.length, destDir)
-                }
-                AppLog.i("${newFiles.size} new file(s) to copy (${filesToCopy.size - newFiles.size} already synced)")
-
-                _syncState.value = _syncState.value.copy(totalFiles = newFiles.size)
-
-                if (newFiles.isEmpty()) {
-                    AppLog.i("All files up to date, nothing to copy")
+                val fatFs = FatFsBridge.openFilesystem(blockDevice)
+                if (fatFs == null) {
+                    AppLog.e("fat32-lib could not read filesystem")
                     _syncState.value = SyncState(
-                        status = SyncState.Status.DONE,
-                        deviceName = deviceName,
-                        filesCopied = 0,
-                        totalFiles = 0
+                        status = SyncState.Status.ERROR,
+                        error = "Unsupported filesystem format."
                     )
-                    storageDevice.close()
+                    try { storageDevice.close() } catch (_: Exception) {}
                     continue
                 }
 
-                var copied = 0
-                var errors = 0
-                val chunkSize = fs.chunkSize
-
-                for ((usbFile, relativePath) in newFiles) {
-                    val originalPath = if (relativePath.isNotEmpty()) relativePath else usbFile.name
-                    val targetPath = addTimestampIfSav(originalPath)
-                    _syncState.value = _syncState.value.copy(currentFile = targetPath)
-
-                    try {
-                        AppLog.d("Copying $targetPath (${usbFile.length} bytes)...")
-                        copyFile(usbFile, destDir, targetPath, chunkSize, fs)
-                        copied++
-                        AppLog.d("Copied $targetPath OK")
-
-                        // Log to sync history
-                        try {
-                            repository.addSyncLogEntry(
-                                SyncLogEntry(
-                                    fileName = targetPath,
-                                    deviceName = deviceName,
-                                    timestamp = System.currentTimeMillis(),
-                                    fileSize = usbFile.length
-                                )
-                            )
-                        } catch (e: Exception) {
-                            AppLog.w("Failed to write sync log entry: ${e.message}")
-                        }
-
-                        _syncState.value = _syncState.value.copy(filesCopied = copied)
-                    } catch (e: Exception) {
-                        errors++
-                        AppLog.e("Error copying $targetPath", e)
-                        _syncState.value = _syncState.value.copy(errors = errors)
-                        // Continue with next file instead of aborting
-                    }
-                }
-
-                val summary = buildString {
-                    append("Sync complete: $copied copied")
-                    if (errors > 0) append(", $errors failed")
-                }
-                AppLog.i(summary)
-
-                _syncState.value = SyncState(
-                    status = if (errors > 0 && copied == 0) SyncState.Status.ERROR else SyncState.Status.DONE,
-                    deviceName = deviceName,
-                    filesCopied = copied,
-                    totalFiles = newFiles.size,
-                    errors = errors,
-                    error = if (errors > 0) "$errors file(s) failed to copy" else null
-                )
-
+                syncWithFat32Lib(fatFs, config, destDir, deviceName)
+                fatFs.close()
                 storageDevice.close()
-
             } catch (e: Exception) {
-                AppLog.e("Sync error", e)
+                AppLog.e("fat32-lib sync error", e)
                 _syncState.value = SyncState(
                     status = SyncState.Status.ERROR,
                     error = e.message ?: "Unknown error"
@@ -326,7 +237,165 @@ class UsbDeviceManager(
         }
     }
 
-    private fun collectFiles(
+    // --- libaums sync path (FAT32 with partition table) ---
+
+    private suspend fun syncWithLibaums(
+        storageDevice: UsbMassStorageDevice,
+        fs: FileSystem,
+        config: DeviceConfig,
+        destDir: File,
+        deviceName: String
+    ) {
+        try {
+            AppLog.i("Syncing $deviceName -> ${destDir.absolutePath}")
+            _syncState.value = SyncState(status = SyncState.Status.SYNCING, deviceName = deviceName)
+
+            val root = fs.rootDirectory
+            AppLog.d("chunkSize=${fs.chunkSize}")
+
+            AppLog.d("Scanning files (filter=${config.fileFilter}, recursive=${config.recursive})...")
+            val filesToCopy = mutableListOf<Pair<UsbFile, String>>()
+            collectLibaumsFiles(root, "", config.fileFilter, config.recursive, filesToCopy)
+            AppLog.d("Found ${filesToCopy.size} matching file(s) on device")
+
+            val newFiles = filesToCopy.filter { (usbFile, relativePath) ->
+                val fileName = if (relativePath.isNotEmpty()) relativePath else usbFile.name
+                if (fileName.lowercase().endsWith(".sav")) true
+                else repository.shouldCopyFile(fileName, usbFile.length, destDir)
+            }
+            AppLog.i("${newFiles.size} new file(s) to copy (${filesToCopy.size - newFiles.size} already synced)")
+
+            _syncState.value = _syncState.value.copy(totalFiles = newFiles.size)
+
+            if (newFiles.isEmpty()) {
+                AppLog.i("All files up to date")
+                _syncState.value = SyncState(status = SyncState.Status.DONE, deviceName = deviceName)
+                storageDevice.close()
+                return
+            }
+
+            var copied = 0
+            var errors = 0
+            val chunkSize = fs.chunkSize
+
+            for ((usbFile, relativePath) in newFiles) {
+                val originalPath = if (relativePath.isNotEmpty()) relativePath else usbFile.name
+                val targetPath = addTimestampIfSav(originalPath)
+                _syncState.value = _syncState.value.copy(currentFile = targetPath)
+
+                try {
+                    AppLog.d("Copying $targetPath (${usbFile.length} bytes)...")
+                    copyLibaumsFile(usbFile, destDir, targetPath, chunkSize, fs)
+                    copied++
+                    AppLog.d("Copied $targetPath OK")
+                    logSyncEntry(targetPath, deviceName, usbFile.length)
+                    _syncState.value = _syncState.value.copy(filesCopied = copied)
+                } catch (e: Exception) {
+                    errors++
+                    AppLog.e("Error copying $targetPath", e)
+                    _syncState.value = _syncState.value.copy(errors = errors)
+                }
+            }
+
+            finishSync(deviceName, copied, newFiles.size, errors)
+            storageDevice.close()
+        } catch (e: Exception) {
+            AppLog.e("Sync error", e)
+            _syncState.value = SyncState(status = SyncState.Status.ERROR, error = e.message ?: "Unknown error")
+            try { storageDevice.close() } catch (_: Exception) {}
+        }
+    }
+
+    // --- fat32-lib sync path (FAT12/16/32 without partition table) ---
+
+    private suspend fun syncWithFat32Lib(
+        fatFs: de.waldheinz.fs.fat.FatFileSystem,
+        config: DeviceConfig,
+        destDir: File,
+        deviceName: String
+    ) {
+        AppLog.i("Syncing $deviceName -> ${destDir.absolutePath} (via fat32-lib)")
+        _syncState.value = SyncState(status = SyncState.Status.SYNCING, deviceName = deviceName)
+
+        AppLog.d("Scanning files (filter=${config.fileFilter}, recursive=${config.recursive})...")
+        val allFiles = FatFsBridge.listFiles(fatFs, config.fileFilter, config.recursive) { name, filter ->
+            repository.matchesFilter(name, filter)
+        }
+        AppLog.d("Found ${allFiles.size} matching file(s) on device")
+
+        val newFiles = allFiles.filter { file ->
+            if (file.name.lowercase().endsWith(".sav")) true
+            else repository.shouldCopyFile(file.relativePath, file.length, destDir)
+        }
+        AppLog.i("${newFiles.size} new file(s) to copy (${allFiles.size - newFiles.size} already synced)")
+
+        _syncState.value = _syncState.value.copy(totalFiles = newFiles.size)
+
+        if (newFiles.isEmpty()) {
+            AppLog.i("All files up to date")
+            _syncState.value = SyncState(status = SyncState.Status.DONE, deviceName = deviceName)
+            return
+        }
+
+        var copied = 0
+        var errors = 0
+
+        for (file in newFiles) {
+            val targetPath = addTimestampIfSav(file.relativePath)
+            _syncState.value = _syncState.value.copy(currentFile = targetPath)
+
+            try {
+                AppLog.d("Copying $targetPath (${file.length} bytes)...")
+                copyFat32LibFile(file, destDir, targetPath)
+                copied++
+                AppLog.d("Copied $targetPath OK")
+                logSyncEntry(targetPath, deviceName, file.length)
+                _syncState.value = _syncState.value.copy(filesCopied = copied)
+            } catch (e: Exception) {
+                errors++
+                AppLog.e("Error copying $targetPath", e)
+                _syncState.value = _syncState.value.copy(errors = errors)
+            }
+        }
+
+        finishSync(deviceName, copied, newFiles.size, errors)
+    }
+
+    // --- Shared helpers ---
+
+    private suspend fun logSyncEntry(targetPath: String, deviceName: String, fileSize: Long) {
+        try {
+            repository.addSyncLogEntry(
+                SyncLogEntry(
+                    fileName = targetPath,
+                    deviceName = deviceName,
+                    timestamp = System.currentTimeMillis(),
+                    fileSize = fileSize
+                )
+            )
+        } catch (e: Exception) {
+            AppLog.w("Failed to write sync log entry: ${e.message}")
+        }
+    }
+
+    private fun finishSync(deviceName: String, copied: Int, total: Int, errors: Int) {
+        val summary = buildString {
+            append("Sync complete: $copied copied")
+            if (errors > 0) append(", $errors failed")
+        }
+        AppLog.i(summary)
+
+        _syncState.value = SyncState(
+            status = if (errors > 0 && copied == 0) SyncState.Status.ERROR else SyncState.Status.DONE,
+            deviceName = deviceName,
+            filesCopied = copied,
+            totalFiles = total,
+            errors = errors,
+            error = if (errors > 0) "$errors file(s) failed to copy" else null
+        )
+    }
+
+    private fun collectLibaumsFiles(
         dir: UsbFile,
         pathPrefix: String,
         filter: String,
@@ -338,7 +407,7 @@ class UsbDeviceManager(
                 if (file.isDirectory) {
                     if (recursive) {
                         val subPath = if (pathPrefix.isEmpty()) file.name else "$pathPrefix/${file.name}"
-                        collectFiles(file, subPath, filter, recursive, result)
+                        collectLibaumsFiles(file, subPath, filter, recursive, result)
                     }
                 } else {
                     if (repository.matchesFilter(file.name, filter)) {
@@ -352,29 +421,26 @@ class UsbDeviceManager(
         }
     }
 
-    /**
-     * Extract block device from UsbMassStorageDevice via reflection.
-     * libaums doesn't expose this field publicly but we need it for superfloppy devices.
-     */
     private fun getBlockDevice(device: UsbMassStorageDevice): BlockDeviceDriver? {
+        // Ensure device is initialized at least at the USB/SCSI level
         try {
-            // After init() (even failed), setupDevice() may have created block devices internally
-            // Try to re-init just the USB communication and block device
             device.init()
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            // Expected to fail on superfloppy (partition table parse error)
+            // but USB communication + block device should be set up
+        }
 
-        // Access internal partitions list - if init partially worked, block devices exist
-        // Use reflection to find block device drivers
+        // Extract block device via reflection (not exposed publicly)
         try {
             val clazz = device.javaClass
             for (field in clazz.declaredFields) {
                 field.isAccessible = true
                 val value = field.get(device)
                 if (value is BlockDeviceDriver) {
-                    AppLog.d("Found BlockDeviceDriver via reflection: blocks=${value.blocks}, blockSize=${value.blockSize}")
+                    AppLog.d("Found BlockDeviceDriver: blocks=${value.blocks}, blockSize=${value.blockSize}")
                     return value
                 }
-                if (value is List<*> && value.isNotEmpty()) {
+                if (value is List<*>) {
                     for (item in value) {
                         if (item is BlockDeviceDriver) {
                             AppLog.d("Found BlockDeviceDriver in list: blocks=${item.blocks}, blockSize=${item.blockSize}")
@@ -382,7 +448,7 @@ class UsbDeviceManager(
                         }
                     }
                 }
-                if (value is Array<*> && value.isNotEmpty()) {
+                if (value is Array<*>) {
                     for (item in value) {
                         if (item is BlockDeviceDriver) {
                             AppLog.d("Found BlockDeviceDriver in array: blocks=${item.blocks}, blockSize=${item.blockSize}")
@@ -405,13 +471,12 @@ class UsbDeviceManager(
         return "${path.substring(0, dot)}_$timestamp${path.substring(dot)}"
     }
 
-    private fun copyFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int, fs: FileSystem) {
+    private fun copyLibaumsFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int, fs: FileSystem) {
         val destFile = File(destDir, relativePath)
         destFile.parentFile?.mkdirs()
 
         FileOutputStream(destFile).use { fos ->
             fos.channel.truncate(0)
-
             val buffer = ByteArray(chunkSize)
             val inputStream = UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
             inputStream.use { input ->
@@ -424,6 +489,25 @@ class UsbDeviceManager(
 
         if (destFile.length() != usbFile.length) {
             AppLog.w("Size mismatch for $relativePath: expected ${usbFile.length}, got ${destFile.length()}")
+        }
+    }
+
+    private fun copyFat32LibFile(file: FatFsFile, destDir: File, relativePath: String) {
+        val destFile = File(destDir, relativePath)
+        destFile.parentFile?.mkdirs()
+
+        FileOutputStream(destFile).use { fos ->
+            val buffer = ByteArray(8192)
+            file.readContents().use { input ->
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    fos.write(buffer, 0, bytesRead)
+                }
+            }
+        }
+
+        if (destFile.length() != file.length) {
+            AppLog.w("Size mismatch for $relativePath: expected ${file.length}, got ${destFile.length()}")
         }
     }
 }

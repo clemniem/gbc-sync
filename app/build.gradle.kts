@@ -55,6 +55,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.libaums.core)
     implementation(libs.gson)
+    implementation(libs.fat32lib)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

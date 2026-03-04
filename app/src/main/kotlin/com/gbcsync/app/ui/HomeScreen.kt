@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.AlertDialog
 import com.gbcsync.app.SyncState
 import com.gbcsync.app.data.AppLog
 import com.gbcsync.app.data.SyncLogEntry
@@ -64,7 +65,9 @@ fun HomeScreen(
     debugLogEnabled: Boolean,
     onRetrySync: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    onOpenGbPrinterWeb: () -> Unit
+    onOpenGbPrinterWeb: () -> Unit,
+    onContinueImport: () -> Unit = {},
+    onNewImport: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(if (debugLogEnabled) 1 else 0) }
 
@@ -115,6 +118,28 @@ fun HomeScreen(
                 1 -> if (debugLogEnabled) LiveLogTab(logLines)
             }
         }
+    }
+
+    // Import continuation dialog
+    syncState.importChoice?.let { choice ->
+        AlertDialog(
+            onDismissRequest = onNewImport,
+            title = { Text("Continue Import?") },
+            text = { Text(choice.message) },
+            confirmButton = {
+                Button(onClick = onContinueImport) {
+                    Text("Continue")
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = onNewImport,
+                    colors = ButtonDefaults.textButtonColors()
+                ) {
+                    Text("Start New")
+                }
+            }
+        )
     }
 }
 

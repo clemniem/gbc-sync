@@ -18,6 +18,7 @@ import com.gbcsync.app.data.SyncRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -34,6 +35,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+data class ImportChoice(
+    val message: String,
+    val existingFolder: String // the folder name to continue, or "" for new
+)
+
 data class SyncState(
     val status: Status = Status.IDLE,
     val deviceName: String = "",
@@ -41,7 +47,8 @@ data class SyncState(
     val filesCopied: Int = 0,
     val totalFiles: Int = 0,
     val errors: Int = 0,
-    val error: String? = null
+    val error: String? = null,
+    val importChoice: ImportChoice? = null // non-null = show dialog
 ) {
     enum class Status { IDLE, CONNECTING, SYNCING, DONE, ERROR }
 
@@ -59,9 +66,24 @@ class UsbDeviceManager(
         private const val MAX_INIT_RETRIES = 3
         private const val INIT_RETRY_DELAY_MS = 1000L
         private const val BRIDGE_RETRY_DELAY_MS = 4000L
+        private const val BRIDGE_FILE_DELAY_MS = 250L
     }
 
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+    private val syncLock = kotlinx.coroutines.sync.Mutex()
+    private var importChoiceDeferred: CompletableDeferred<Boolean>? = null // true = continue existing, false = new
+
+    /** Called from UI when user chooses to continue existing import */
+    fun onContinueImport() {
+        _syncState.value = _syncState.value.copy(importChoice = null)
+        importChoiceDeferred?.complete(true)
+    }
+
+    /** Called from UI when user chooses to start a new import */
+    fun onNewImport() {
+        _syncState.value = _syncState.value.copy(importChoice = null)
+        importChoiceDeferred?.complete(false)
+    }
 
     private val _syncState = MutableStateFlow(SyncState())
     val syncState: StateFlow<SyncState> = _syncState
@@ -166,6 +188,18 @@ class UsbDeviceManager(
     }
 
     private suspend fun startSync() {
+        if (!syncLock.tryLock()) {
+            AppLog.d("Sync already in progress, skipping")
+            return
+        }
+        try {
+            doSync()
+        } finally {
+            syncLock.unlock()
+        }
+    }
+
+    private suspend fun doSync() {
         val massStorageDevices = UsbMassStorageDevice.getMassStorageDevices(context)
         if (massStorageDevices.isEmpty()) return
 
@@ -258,9 +292,9 @@ class UsbDeviceManager(
 
     /**
      * 2bitBridge sync flow (vendor=9114, product=51966).
-     * Uses libaums with retry logic (close + reinit on failure).
-     * At commit 943ecd1 this was proven to connect and list files on retry.
-     * File reading via libaums still fails — that's the next thing to fix.
+     * The RP2040/TinyUSB connection degrades after sustained SCSI traffic,
+     * so we copy files one at a time with delays, and reconnect when errors occur.
+     * Tracks successfully copied files across reconnections.
      */
     private suspend fun syncBridge(
         storageDevice: UsbMassStorageDevice,
@@ -268,65 +302,211 @@ class UsbDeviceManager(
         destDir: File,
         deviceName: String
     ) {
-        // Step 1: Try libaums with retries (wait for RP2040 boot + close/reinit on failure)
-        var initSuccess = false
-        for (attempt in 1..MAX_INIT_RETRIES) {
-            try {
-                _syncState.value = SyncState(
-                    status = SyncState.Status.CONNECTING,
-                    deviceName = deviceName,
-                    currentFile = "Waiting for Bridge to be ready... (${BRIDGE_RETRY_DELAY_MS / 1000}s)"
-                )
-                AppLog.d("[Bridge] Waiting ${BRIDGE_RETRY_DELAY_MS}ms for RP2040 before attempt $attempt...")
-                delay(BRIDGE_RETRY_DELAY_MS)
+        // Check for recent import folder (within 60 minutes)
+        val importDir: File
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US)
+        val now = System.currentTimeMillis()
+        val recentFolder = destDir.listFiles()
+            ?.filter { it.isDirectory }
+            ?.mapNotNull { dir ->
+                try {
+                    val folderTime = dateFormat.parse(dir.name)?.time ?: return@mapNotNull null
+                    if (now - folderTime < 60 * 60 * 1000) dir to folderTime else null
+                } catch (_: Exception) { null }
+            }
+            ?.maxByOrNull { it.second }
+            ?.first
 
-                AppLog.i("[Bridge] libaums init attempt $attempt/$MAX_INIT_RETRIES...")
-                _syncState.value = _syncState.value.copy(
-                    currentFile = "Connecting to Bridge... (attempt $attempt)"
+        if (recentFolder != null) {
+            val fileCount = recentFolder.listFiles()?.size ?: 0
+            AppLog.i("[Bridge] Found recent import: ${recentFolder.name} ($fileCount files)")
+            importChoiceDeferred = CompletableDeferred()
+            _syncState.value = _syncState.value.copy(
+                importChoice = ImportChoice(
+                    message = "Continue import \"${recentFolder.name}\" ($fileCount files already)?",
+                    existingFolder = recentFolder.name
                 )
-                storageDevice.init()
-                initSuccess = true
-                AppLog.i("[Bridge] libaums init OK on attempt $attempt")
-                break
+            )
+            val continueExisting = importChoiceDeferred!!.await()
+            if (continueExisting) {
+                importDir = recentFolder
+                AppLog.i("[Bridge] Continuing import: ${importDir.name}")
+            } else {
+                val importTimestamp = dateFormat.format(Date())
+                importDir = File(destDir, importTimestamp)
+                importDir.mkdirs()
+                AppLog.i("[Bridge] New import folder: ${importDir.name}")
+            }
+        } else {
+            val importTimestamp = dateFormat.format(Date())
+            importDir = File(destDir, importTimestamp)
+            importDir.mkdirs()
+            AppLog.i("[Bridge] Import folder: ${importDir.name}")
+        }
+
+        // Pre-populate with files already in import folder (for continued imports)
+        val copiedFiles = mutableSetOf<String>()
+        importDir.walkTopDown().filter { it.isFile }.forEach { file ->
+            val rel = file.relativeTo(importDir).path
+            copiedFiles.add(rel)
+        }
+        if (copiedFiles.isNotEmpty()) {
+            AppLog.i("[Bridge] ${copiedFiles.size} files already in import folder")
+        }
+        var totalFiles = 0
+        var consecutiveInitFailures = 0
+        val maxInitFailures = 3
+        var currentDevice = storageDevice
+
+        for (round in 1..20) { // max 20 reconnection rounds
+            // Step 1: Connect (wait for RP2040 boot on first round, shorter on reconnects)
+            val waitMs = if (round == 1) BRIDGE_RETRY_DELAY_MS else 2000L
+            _syncState.value = SyncState(
+                status = SyncState.Status.CONNECTING,
+                deviceName = deviceName,
+                currentFile = if (round == 1) "Waiting for Bridge to boot..." else "Reconnecting... (round $round)"
+            )
+            AppLog.i("[Bridge] Round $round: waiting ${waitMs}ms...")
+            delay(waitMs)
+
+            // Step 2: Init libaums
+            try {
+                if (round > 1) {
+                    // Get fresh device handle for reconnection
+                    val devices = UsbMassStorageDevice.getMassStorageDevices(context)
+                    val found = devices.firstOrNull { d ->
+                        d.usbDevice.vendorId == 9114 && d.usbDevice.productId == 51966
+                    }
+                    if (found == null) {
+                        AppLog.e("[Bridge] Bridge not found on reconnect")
+                        break
+                    }
+                    currentDevice = found
+                    // Check permission (may have been lost on replug)
+                    if (!usbManager.hasPermission(currentDevice.usbDevice)) {
+                        AppLog.w("[Bridge] Permission lost, re-requesting...")
+                        val permissionIntent = PendingIntent.getBroadcast(
+                            context, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_MUTABLE
+                        )
+                        usbManager.requestPermission(currentDevice.usbDevice, permissionIntent)
+                        break // will resume via permission callback
+                    }
+                }
+                AppLog.i("[Bridge] Round $round: libaums init...")
+                currentDevice.init()
+                AppLog.i("[Bridge] Round $round: libaums init OK")
+                consecutiveInitFailures = 0
             } catch (e: Exception) {
-                AppLog.w("[Bridge] Init attempt $attempt failed: ${e.message}")
-                try { storageDevice.close() } catch (_: Exception) {}
-                if (attempt < MAX_INIT_RETRIES) {
-                    _syncState.value = SyncState(
-                        status = SyncState.Status.CONNECTING,
-                        deviceName = deviceName,
-                        currentFile = "Waiting for Bridge to recover... (${BRIDGE_RETRY_DELAY_MS / 1000}s)"
-                    )
-                    AppLog.d("[Bridge] Waiting ${BRIDGE_RETRY_DELAY_MS}ms before retry...")
-                    delay(BRIDGE_RETRY_DELAY_MS)
+                AppLog.w("[Bridge] Round $round: init failed: ${e.message}")
+                try { currentDevice.close() } catch (_: Exception) {}
+                consecutiveInitFailures++
+                if (consecutiveInitFailures >= maxInitFailures) {
+                    AppLog.e("[Bridge] $maxInitFailures consecutive init failures, giving up")
+                    break
+                }
+                continue
+            }
+
+            // Step 3: List files and find what still needs copying
+            val partition = currentDevice.partitions.firstOrNull()
+            if (partition == null) {
+                AppLog.w("[Bridge] Round $round: no partitions")
+                try { currentDevice.close() } catch (_: Exception) {}
+                continue
+            }
+
+            val fs = partition.fileSystem
+            if (round == 1) {
+                AppLog.i("[Bridge] Filesystem: ${fs.volumeLabel}, capacity=${fs.capacity}")
+            }
+
+            val allFiles = mutableListOf<Pair<UsbFile, String>>()
+            collectLibaumsFiles(fs.rootDirectory, "", config.fileFilter, config.recursive, allFiles)
+
+            val newFiles = allFiles.filter { (_, relativePath) ->
+                val fileName = if (relativePath.isNotEmpty()) relativePath else return@filter true
+                !copiedFiles.contains(fileName) // skip files already copied this session
+            }
+
+            if (round == 1) {
+                totalFiles = newFiles.size
+                AppLog.i("[Bridge] ${newFiles.size} file(s) to copy")
+            }
+
+            if (newFiles.isEmpty()) {
+                AppLog.i("[Bridge] All files copied!")
+                try { currentDevice.close() } catch (_: Exception) {}
+                break
+            }
+
+            _syncState.value = SyncState(
+                status = SyncState.Status.SYNCING,
+                deviceName = deviceName,
+                filesCopied = copiedFiles.size,
+                totalFiles = totalFiles
+            )
+
+            // Step 4: Copy files one at a time, stop on first error and reconnect
+            val currentDelayMs = BRIDGE_FILE_DELAY_MS
+            val chunkSize = fs.chunkSize
+            var errorInRound = false
+            var copiedThisRound = 0
+            AppLog.i("[Bridge] Round $round: ${newFiles.size} files remaining, delay=${currentDelayMs}ms")
+
+            for ((usbFile, relativePath) in newFiles) {
+                val originalPath = if (relativePath.isNotEmpty()) relativePath else usbFile.name
+                val targetPath = addTimestampIfSav(originalPath)
+                _syncState.value = _syncState.value.copy(currentFile = targetPath)
+
+                try {
+                    AppLog.d("[Bridge] Copying $targetPath (${usbFile.length} bytes)...")
+                    copyLibaumsFile(usbFile, importDir, targetPath, chunkSize, fs)
+
+                    // Verify file was actually written with content
+                    val destFile = File(importDir, targetPath)
+                    if (destFile.length() == 0L && usbFile.length > 0) {
+                        AppLog.w("[Bridge] $targetPath copied as 0 bytes, connection degraded")
+                        destFile.delete()
+                        errorInRound = true
+                        break
+                    }
+
+                    copiedFiles.add(originalPath)
+                    copiedThisRound++
+                    AppLog.d("[Bridge] Copied $targetPath OK (#$copiedThisRound this round, delay=${currentDelayMs}ms)")
+                    logSyncEntry(targetPath, deviceName, usbFile.length)
+                    _syncState.value = _syncState.value.copy(filesCopied = copiedFiles.size)
+
+                    // Give RP2040 time to recover between files
+                    if (currentDelayMs > 0) delay(currentDelayMs)
+                } catch (e: Exception) {
+                    AppLog.w("[Bridge] Error copying $targetPath: ${e.message}")
+                    // Delete partial file
+                    try { File(importDir, targetPath).delete() } catch (_: Exception) {}
+                    errorInRound = true
+                    break // stop this round, reconnect
                 }
             }
+
+            // Clean up connection before reconnecting
+            try { currentDevice.close() } catch (_: Exception) {}
+
+            if (!errorInRound) {
+                AppLog.i("[Bridge] Round $round finished without errors (delay=${currentDelayMs}ms)")
+                break
+            }
+
+            AppLog.i("[Bridge] Round $round: $copiedThisRound copied this round, ${copiedFiles.size}/$totalFiles total, delay=${currentDelayMs}ms, reconnecting...")
         }
 
-        if (!initSuccess) {
-            AppLog.e("[Bridge] Failed to initialize after $MAX_INIT_RETRIES attempts")
-            _syncState.value = SyncState(
-                status = SyncState.Status.ERROR,
-                error = "Failed to initialize USB device after $MAX_INIT_RETRIES attempts. Try unplugging and re-plugging."
-            )
-            return
+        // Final status
+        val remaining = totalFiles - copiedFiles.size
+        finishSync(deviceName, copiedFiles.size, totalFiles, remaining)
+        if (remaining > 0) {
+            AppLog.w("[Bridge] Finished with $remaining file(s) remaining")
+        } else {
+            AppLog.i("[Bridge] All $totalFiles file(s) synced successfully")
         }
-
-        // Step 2: Use libaums filesystem
-        val partition = storageDevice.partitions.firstOrNull()
-        if (partition == null) {
-            AppLog.e("[Bridge] No partitions found after successful init")
-            _syncState.value = SyncState(
-                status = SyncState.Status.ERROR,
-                error = "No partitions found on device."
-            )
-            return
-        }
-
-        val fs = partition.fileSystem
-        AppLog.i("[Bridge] libaums filesystem: ${fs.volumeLabel}, capacity=${fs.capacity}, chunkSize=${fs.chunkSize}")
-        syncWithLibaums(storageDevice, fs, config, destDir, deviceName)
-        AppLog.i("[Bridge] Sync complete via libaums")
     }
 
     // --- libaums sync path (FAT32 with partition table) ---
@@ -336,7 +516,8 @@ class UsbDeviceManager(
         fs: FileSystem,
         config: DeviceConfig,
         destDir: File,
-        deviceName: String
+        deviceName: String,
+        perFileDelayMs: Long = 0
     ) {
         try {
             AppLog.i("Syncing $deviceName -> ${destDir.absolutePath}")
@@ -382,6 +563,7 @@ class UsbDeviceManager(
                     AppLog.d("Copied $targetPath OK")
                     logSyncEntry(targetPath, deviceName, usbFile.length)
                     _syncState.value = _syncState.value.copy(filesCopied = copied)
+                    if (perFileDelayMs > 0) delay(perFileDelayMs)
                 } catch (e: Exception) {
                     errors++
                     AppLog.e("Error copying $targetPath", e)
@@ -763,11 +945,12 @@ class UsbDeviceManager(
             fos.channel.truncate(0)
             val buffer = ByteArray(chunkSize)
             val inputStream = UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
-            inputStream.use { input ->
-                var bytesRead: Int
-                while (input.read(buffer).also { bytesRead = it } != -1) {
-                    fos.write(buffer, 0, bytesRead)
-                }
+            // Don't use .use{} — closing the stream triggers FatFile.flush() which
+            // sends SCSI WRITE commands that corrupt the RP2040's USB state.
+            // We read all data then intentionally skip close.
+            var bytesRead: Int
+            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                fos.write(buffer, 0, bytesRead)
             }
         }
 

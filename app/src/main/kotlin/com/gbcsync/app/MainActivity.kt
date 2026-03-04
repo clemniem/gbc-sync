@@ -71,7 +71,9 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToSettings = { navController.navigate("settings") },
                                 onOpenGbPrinterWeb = {
                                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://herrzatacke.github.io/gb-printer-web/")))
-                                }
+                                },
+                                onContinueImport = { usbManager.onContinueImport() },
+                                onNewImport = { usbManager.onNewImport() }
                             )
                         }
                         composable("settings") {

@@ -19,7 +19,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.jahnen.libaums.core.UsbMassStorageDevice
+import me.jahnen.libaums.core.driver.BlockDeviceDriver
+import me.jahnen.libaums.core.fs.FileSystem
+import me.jahnen.libaums.core.fs.FileSystemFactory
 import me.jahnen.libaums.core.fs.UsbFile
+import me.jahnen.libaums.core.fs.UsbFileStreamFactory
+import me.jahnen.libaums.core.partition.PartitionTableEntry
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -164,32 +169,52 @@ class UsbDeviceManager(
         val configs = repository.deviceConfigs.first()
 
         for (storageDevice in massStorageDevices) {
-            var initSuccess = false
+            var fs: FileSystem? = null
 
-            // Retry device init - libaums can fail with "Max Recovery attempts"
+            // Try normal init (with partition table) first, then superfloppy fallback
             for (attempt in 1..MAX_INIT_RETRIES) {
                 try {
                     AppLog.d("Initializing storage device (attempt $attempt/$MAX_INIT_RETRIES)...")
                     storageDevice.init()
-                    initSuccess = true
-                    AppLog.d("Device initialized OK")
+                    val partition = storageDevice.partitions.firstOrNull()
+                    if (partition != null) {
+                        fs = partition.fileSystem
+                        AppLog.d("Partition filesystem: ${fs!!.volumeLabel}, capacity=${fs!!.capacity}")
+                    } else {
+                        AppLog.w("No partitions found after init")
+                    }
                     break
                 } catch (e: Exception) {
                     AppLog.w("Init attempt $attempt failed: ${e.message}")
                     try { storageDevice.close() } catch (_: Exception) {}
                     if (attempt < MAX_INIT_RETRIES) {
-                        AppLog.d("Waiting ${INIT_RETRY_DELAY_MS}ms before retry...")
                         delay(INIT_RETRY_DELAY_MS)
                     }
                 }
             }
 
-            if (!initSuccess) {
-                AppLog.e("Failed to initialize device after $MAX_INIT_RETRIES attempts")
+            // Superfloppy fallback: no partition table, FS at block 0
+            if (fs == null) {
+                AppLog.i("Trying superfloppy mode (no partition table)...")
+                try {
+                    val blockDevice = getBlockDevice(storageDevice)
+                    if (blockDevice != null) {
+                        val entry = PartitionTableEntry(0x0B, 0, blockDevice.blocks) // 0x0B = FAT32
+                        fs = FileSystemFactory.createFileSystem(entry, blockDevice)
+                        AppLog.d("Superfloppy filesystem: ${fs!!.volumeLabel}, capacity=${fs!!.capacity}")
+                    }
+                } catch (e: Exception) {
+                    AppLog.e("Superfloppy init failed", e)
+                }
+            }
+
+            if (fs == null) {
+                AppLog.e("Failed to access filesystem after all attempts")
                 _syncState.value = SyncState(
                     status = SyncState.Status.ERROR,
-                    error = "Failed to initialize USB device after $MAX_INIT_RETRIES attempts. Try unplugging and re-plugging."
+                    error = "Cannot read filesystem. Try unplugging and re-plugging."
                 )
+                try { storageDevice.close() } catch (_: Exception) {}
                 return
             }
 
@@ -204,14 +229,8 @@ class UsbDeviceManager(
                     deviceName = deviceName
                 )
 
-                val partition = storageDevice.partitions.firstOrNull()
-                if (partition == null) {
-                    AppLog.e("No partitions found on device")
-                    continue
-                }
-                val fs = partition.fileSystem
                 val root = fs.rootDirectory
-                AppLog.d("Filesystem: ${fs.volumeLabel}, capacity=${fs.capacity}, chunkSize=${fs.chunkSize}")
+                AppLog.d("chunkSize=${fs.chunkSize}")
 
                 // Collect files to copy
                 AppLog.d("Scanning files (filter=${config.fileFilter}, recursive=${config.recursive})...")
@@ -333,6 +352,52 @@ class UsbDeviceManager(
         }
     }
 
+    /**
+     * Extract block device from UsbMassStorageDevice via reflection.
+     * libaums doesn't expose this field publicly but we need it for superfloppy devices.
+     */
+    private fun getBlockDevice(device: UsbMassStorageDevice): BlockDeviceDriver? {
+        try {
+            // After init() (even failed), setupDevice() may have created block devices internally
+            // Try to re-init just the USB communication and block device
+            device.init()
+        } catch (_: Exception) {}
+
+        // Access internal partitions list - if init partially worked, block devices exist
+        // Use reflection to find block device drivers
+        try {
+            val clazz = device.javaClass
+            for (field in clazz.declaredFields) {
+                field.isAccessible = true
+                val value = field.get(device)
+                if (value is BlockDeviceDriver) {
+                    AppLog.d("Found BlockDeviceDriver via reflection: blocks=${value.blocks}, blockSize=${value.blockSize}")
+                    return value
+                }
+                if (value is List<*> && value.isNotEmpty()) {
+                    for (item in value) {
+                        if (item is BlockDeviceDriver) {
+                            AppLog.d("Found BlockDeviceDriver in list: blocks=${item.blocks}, blockSize=${item.blockSize}")
+                            return item
+                        }
+                    }
+                }
+                if (value is Array<*> && value.isNotEmpty()) {
+                    for (item in value) {
+                        if (item is BlockDeviceDriver) {
+                            AppLog.d("Found BlockDeviceDriver in array: blocks=${item.blocks}, blockSize=${item.blockSize}")
+                            return item
+                        }
+                    }
+                }
+            }
+            AppLog.w("Could not find BlockDeviceDriver via reflection")
+        } catch (e: Exception) {
+            AppLog.e("Reflection failed", e)
+        }
+        return null
+    }
+
     private fun addTimestampIfSav(path: String): String {
         if (!path.lowercase().endsWith(".sav")) return path
         val timestamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
@@ -340,7 +405,7 @@ class UsbDeviceManager(
         return "${path.substring(0, dot)}_$timestamp${path.substring(dot)}"
     }
 
-    private fun copyFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int, fs: me.jahnen.libaums.core.fs.FileSystem) {
+    private fun copyFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int, fs: FileSystem) {
         val destFile = File(destDir, relativePath)
         destFile.parentFile?.mkdirs()
 
@@ -348,7 +413,7 @@ class UsbDeviceManager(
             fos.channel.truncate(0)
 
             val buffer = ByteArray(chunkSize)
-            val inputStream = me.jahnen.libaums.core.fs.UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
+            val inputStream = UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
             inputStream.use { input ->
                 var bytesRead: Int
                 while (input.read(buffer).also { bytesRead = it } != -1) {

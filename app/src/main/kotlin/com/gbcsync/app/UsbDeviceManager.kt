@@ -20,9 +20,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.jahnen.libaums.core.UsbMassStorageDevice
 import me.jahnen.libaums.core.driver.BlockDeviceDriver
+import me.jahnen.libaums.core.driver.BlockDeviceDriverFactory
 import me.jahnen.libaums.core.fs.FileSystem
 import me.jahnen.libaums.core.fs.UsbFile
 import me.jahnen.libaums.core.fs.UsbFileStreamFactory
+import me.jahnen.libaums.core.usb.UsbCommunication
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -422,44 +424,72 @@ class UsbDeviceManager(
     }
 
     private fun getBlockDevice(device: UsbMassStorageDevice): BlockDeviceDriver? {
-        // Ensure device is initialized at least at the USB/SCSI level
+        // UsbMassStorageDevice doesn't store BlockDeviceDriver as a field —
+        // it's a local variable in setupDevice() passed into Partition objects.
+        // For superfloppy devices (no partition table), partitions are empty,
+        // so we need to create the BlockDeviceDriver ourselves via reflection
+        // to get the UsbCommunication object.
         try {
-            device.init()
-        } catch (_: Exception) {
-            // Expected to fail on superfloppy (partition table parse error)
-            // but USB communication + block device should be set up
-        }
+            // First try: init normally and get from partitions
+            try {
+                device.init()
+                if (device.partitions.isNotEmpty()) {
+                    // Extract from partition's ByteBlockDevice.targetBlockDevice
+                    val partition = device.partitions[0]
+                    val byteBlockClass = partition.javaClass.superclass
+                    val targetField = byteBlockClass?.getDeclaredField("targetBlockDevice")
+                    if (targetField != null) {
+                        targetField.isAccessible = true
+                        val driver = targetField.get(partition) as? BlockDeviceDriver
+                        if (driver != null) {
+                            AppLog.d("Got BlockDeviceDriver from partition: blocks=${driver.blocks}, blockSize=${driver.blockSize}")
+                            return driver
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                AppLog.d("Normal init failed (expected for superfloppy): ${e.message}")
+            }
 
-        // Extract block device via reflection (not exposed publicly)
-        try {
+            // Second try: create BlockDeviceDriver directly from UsbCommunication
             val clazz = device.javaClass
+            var usbComm: UsbCommunication? = null
             for (field in clazz.declaredFields) {
                 field.isAccessible = true
                 val value = field.get(device)
-                if (value is BlockDeviceDriver) {
-                    AppLog.d("Found BlockDeviceDriver: blocks=${value.blocks}, blockSize=${value.blockSize}")
-                    return value
+                if (value is UsbCommunication) {
+                    usbComm = value
+                    AppLog.d("Found UsbCommunication via reflection (field: ${field.name})")
+                    break
                 }
-                if (value is List<*>) {
-                    for (item in value) {
-                        if (item is BlockDeviceDriver) {
-                            AppLog.d("Found BlockDeviceDriver in list: blocks=${item.blocks}, blockSize=${item.blockSize}")
-                            return item
-                        }
-                    }
-                }
-                if (value is Array<*>) {
-                    for (item in value) {
-                        if (item is BlockDeviceDriver) {
-                            AppLog.d("Found BlockDeviceDriver in array: blocks=${item.blocks}, blockSize=${item.blockSize}")
-                            return item
-                        }
+            }
+
+            if (usbComm == null) {
+                // UsbCommunication might not be initialized yet if init() failed early.
+                // Try to trigger partial init by calling init() again — it sets up USB comm
+                // before failing on partition table.
+                try { device.init() } catch (_: Exception) {}
+                for (field in clazz.declaredFields) {
+                    field.isAccessible = true
+                    val value = field.get(device)
+                    if (value is UsbCommunication) {
+                        usbComm = value
+                        AppLog.d("Found UsbCommunication after retry (field: ${field.name})")
+                        break
                     }
                 }
             }
-            AppLog.w("Could not find BlockDeviceDriver via reflection")
+
+            if (usbComm != null) {
+                val blockDevice = BlockDeviceDriverFactory.createBlockDevice(usbComm, lun = 0.toByte())
+                blockDevice.init()
+                AppLog.d("Created BlockDeviceDriver: blocks=${blockDevice.blocks}, blockSize=${blockDevice.blockSize}")
+                return blockDevice
+            }
+
+            AppLog.w("Could not find UsbCommunication via reflection")
         } catch (e: Exception) {
-            AppLog.e("Reflection failed", e)
+            AppLog.e("Failed to get BlockDeviceDriver", e)
         }
         return null
     }

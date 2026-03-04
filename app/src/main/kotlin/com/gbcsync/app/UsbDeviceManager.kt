@@ -200,8 +200,8 @@ class UsbDeviceManager(
 
             if (synced) continue
 
-            // Fallback: use fat32-lib for FAT12/16/32 via block device
-            AppLog.i("Falling back to fat32-lib (supports FAT12/16/32)...")
+            // Fallback: direct FAT12/16 reader via block device
+            AppLog.i("Falling back to FAT12/16 reader...")
             val blockDevice = getBlockDevice(storageDevice)
             if (blockDevice == null) {
                 AppLog.e("Cannot access block device")
@@ -214,22 +214,11 @@ class UsbDeviceManager(
             }
 
             try {
-                val fatFs = FatFsBridge.openFilesystem(blockDevice)
-                if (fatFs == null) {
-                    AppLog.e("fat32-lib could not read filesystem")
-                    _syncState.value = SyncState(
-                        status = SyncState.Status.ERROR,
-                        error = "Unsupported filesystem format."
-                    )
-                    try { storageDevice.close() } catch (_: Exception) {}
-                    continue
-                }
-
-                syncWithFat32Lib(fatFs, config, destDir, deviceName)
-                fatFs.close()
+                val fatReader = Fat12Reader(blockDevice)
+                syncWithFatReader(fatReader, config, destDir, deviceName)
                 storageDevice.close()
             } catch (e: Exception) {
-                AppLog.e("fat32-lib sync error", e)
+                AppLog.e("FAT reader sync error", e)
                 _syncState.value = SyncState(
                     status = SyncState.Status.ERROR,
                     error = e.message ?: "Unknown error"
@@ -308,20 +297,26 @@ class UsbDeviceManager(
         }
     }
 
-    // --- fat32-lib sync path (FAT12/16/32 without partition table) ---
+    // --- FAT12/16 reader sync path (superfloppy without partition table) ---
 
-    private suspend fun syncWithFat32Lib(
-        fatFs: de.waldheinz.fs.fat.FatFileSystem,
+    private suspend fun syncWithFatReader(
+        fatReader: Fat12Reader,
         config: DeviceConfig,
         destDir: File,
         deviceName: String
     ) {
-        AppLog.i("Syncing $deviceName -> ${destDir.absolutePath} (via fat32-lib)")
+        AppLog.i("Syncing $deviceName -> ${destDir.absolutePath} (via ${fatReader.fatType} reader)")
         _syncState.value = SyncState(status = SyncState.Status.SYNCING, deviceName = deviceName)
 
         AppLog.d("Scanning files (filter=${config.fileFilter}, recursive=${config.recursive})...")
-        val allFiles = FatFsBridge.listFiles(fatFs, config.fileFilter, config.recursive) { name, filter ->
-            repository.matchesFilter(name, filter)
+        val allFiles = if (config.recursive) {
+            fatReader.listFilesRecursive(config.fileFilter) { name, filter ->
+                repository.matchesFilter(name, filter)
+            }
+        } else {
+            fatReader.listRootFiles(config.fileFilter) { name, filter ->
+                repository.matchesFilter(name, filter)
+            }
         }
         AppLog.d("Found ${allFiles.size} matching file(s) on device")
 

@@ -2,6 +2,7 @@ package com.gbcsync.app
 
 import android.content.Intent
 import android.hardware.usb.UsbManager
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -67,7 +68,10 @@ class MainActivity : ComponentActivity() {
                                 logLines = logLines,
                                 debugLogEnabled = debugLogEnabled,
                                 onRetrySync = { usbManager.retrySync() },
-                                onNavigateToSettings = { navController.navigate("settings") }
+                                onNavigateToSettings = { navController.navigate("settings") },
+                                onOpenGbPrinterWeb = {
+                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://herrzatacke.github.io/gb-printer-web/")))
+                                }
                             )
                         }
                         composable("settings") {

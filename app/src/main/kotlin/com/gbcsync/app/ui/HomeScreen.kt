@@ -18,10 +18,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.UsbOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -61,7 +63,8 @@ fun HomeScreen(
     logLines: List<String>,
     debugLogEnabled: Boolean,
     onRetrySync: () -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    onOpenGbPrinterWeb: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(if (debugLogEnabled) 1 else 0) }
 
@@ -91,6 +94,7 @@ fun HomeScreen(
             ConnectionStatusCard(
                 connectedDevice, syncState,
                 onRetry = onRetrySync,
+                onOpenGbPrinterWeb = onOpenGbPrinterWeb,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
@@ -170,7 +174,7 @@ private fun LiveLogTab(logLines: List<String>) {
 }
 
 @Composable
-private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState, onRetry: () -> Unit, onOpenGbPrinterWeb: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -232,6 +236,20 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = onRetry) {
                     Text("Retry Sync")
+                }
+            }
+
+            if (syncState.status == SyncState.Status.DONE && syncState.filesCopied > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onOpenGbPrinterWeb,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary
+                    )
+                ) {
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Open GB Printer Web")
                 }
             }
         }

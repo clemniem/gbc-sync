@@ -60,15 +60,15 @@ class SyncRepository(private val context: Context) {
     private fun defaultDevices(): List<DeviceConfig> = listOf(
         DeviceConfig(
             name = "JoeyJr",
-            vendorId = 0,
-            productId = 0,
+            vendorId = 49745,
+            productId = 8224,
             fileFilter = "*.sav",
             recursive = false
         ),
         DeviceConfig(
             name = "2bitBridge",
-            vendorId = 0,
-            productId = 0,
+            vendorId = 9114,
+            productId = 51966,
             fileFilter = "*",
             recursive = true
         )

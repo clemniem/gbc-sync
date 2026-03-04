@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.gbcsync.app"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.gbcsync.app"

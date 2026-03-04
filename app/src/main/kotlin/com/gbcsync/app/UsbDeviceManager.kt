@@ -7,7 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
-import android.util.Log
+import com.gbcsync.app.data.AppLog
 import com.gbcsync.app.data.DeviceConfig
 import com.gbcsync.app.data.SyncLogEntry
 import com.gbcsync.app.data.SyncRepository
@@ -61,17 +61,17 @@ class UsbDeviceManager(
         override fun onReceive(ctx: Context, intent: Intent) {
             when (intent.action) {
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    Log.d(TAG, "USB device detached")
+                    AppLog.d("USB device detached")
                     _connectedDevice.value = null
                     _syncState.value = SyncState()
                 }
                 ACTION_USB_PERMISSION -> {
                     val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
                     if (granted) {
-                        Log.d(TAG, "USB permission granted")
+                        AppLog.d("USB permission granted")
                         scope.launch(Dispatchers.IO) { startSync() }
                     } else {
-                        Log.w(TAG, "USB permission denied")
+                        AppLog.w("USB permission denied")
                         _syncState.value = SyncState(
                             status = SyncState.Status.ERROR,
                             error = "USB permission denied"
@@ -99,26 +99,33 @@ class UsbDeviceManager(
     }
 
     fun onUsbDeviceAttached() {
+        AppLog.i("USB device attached event received")
         scope.launch(Dispatchers.IO) { detectAndSync() }
     }
 
     private suspend fun detectAndSync() {
+        AppLog.d("Scanning for mass storage devices...")
         val massStorageDevices = UsbMassStorageDevice.getMassStorageDevices(context)
         if (massStorageDevices.isEmpty()) {
-            Log.d(TAG, "No mass storage devices found")
+            AppLog.w("No mass storage devices found")
             return
         }
+        AppLog.d("Found ${massStorageDevices.size} mass storage device(s)")
 
         val configs = repository.deviceConfigs.first()
+        AppLog.d("Loaded ${configs.size} device config(s)")
 
         for (device in massStorageDevices) {
             val usbDevice = device.usbDevice
+            AppLog.d("Device: vendorId=${usbDevice.vendorId} productId=${usbDevice.productId} name=${usbDevice.deviceName}")
             val matchedConfig = findMatchingConfig(usbDevice, configs)
 
             _connectedDevice.value = matchedConfig?.name ?: "Unknown USB (${usbDevice.vendorId}:${usbDevice.productId})"
+            AppLog.i("Matched config: ${matchedConfig?.name ?: "none"}")
             _syncState.value = SyncState(status = SyncState.Status.CONNECTING, deviceName = _connectedDevice.value ?: "")
 
             if (!usbManager.hasPermission(usbDevice)) {
+                AppLog.d("Requesting USB permission...")
                 val permissionIntent = PendingIntent.getBroadcast(
                     context, 0,
                     Intent(ACTION_USB_PERMISSION),
@@ -153,11 +160,13 @@ class UsbDeviceManager(
 
         for (storageDevice in massStorageDevices) {
             try {
+                AppLog.d("Initializing storage device...")
                 storageDevice.init()
 
                 val config = findMatchingConfig(storageDevice.usbDevice, configs) ?: configs.firstOrNull() ?: continue
                 val destDir = repository.getDestDir(config)
                 val deviceName = config.name
+                AppLog.i("Syncing $deviceName -> ${destDir.absolutePath}")
 
                 _syncState.value = SyncState(
                     status = SyncState.Status.SYNCING,
@@ -169,8 +178,10 @@ class UsbDeviceManager(
                 val root = fs.rootDirectory
 
                 // Collect files to copy
+                AppLog.d("Scanning files (filter=${config.fileFilter}, recursive=${config.recursive})...")
                 val filesToCopy = mutableListOf<Pair<UsbFile, String>>()
                 collectFiles(root, "", config.fileFilter, config.recursive, filesToCopy)
+                AppLog.d("Found ${filesToCopy.size} matching file(s) on device")
 
                 // Filter out already-synced files (.sav files always copy with timestamp)
                 val newFiles = filesToCopy.filter { (usbFile, relativePath) ->
@@ -178,6 +189,7 @@ class UsbDeviceManager(
                     if (fileName.lowercase().endsWith(".sav")) true
                     else repository.shouldCopyFile(fileName, usbFile.length, destDir)
                 }
+                AppLog.i("${newFiles.size} new file(s) to copy (${filesToCopy.size - newFiles.size} already synced)")
 
                 _syncState.value = _syncState.value.copy(totalFiles = newFiles.size)
 
@@ -201,8 +213,10 @@ class UsbDeviceManager(
                     _syncState.value = _syncState.value.copy(currentFile = targetPath)
 
                     try {
+                        AppLog.d("Copying $targetPath (${usbFile.length} bytes)...")
                         copyFile(usbFile, destDir, targetPath, chunkSize, fs)
                         copied++
+                        AppLog.d("Copied $targetPath OK")
 
                         repository.addSyncLogEntry(
                             SyncLogEntry(
@@ -215,10 +229,11 @@ class UsbDeviceManager(
 
                         _syncState.value = _syncState.value.copy(filesCopied = copied)
                     } catch (e: Exception) {
-                        Log.e(TAG, "Error copying $targetPath", e)
+                        AppLog.e("Error copying $targetPath", e)
                     }
                 }
 
+                AppLog.i("Sync complete: $copied/${newFiles.size} file(s) copied")
                 _syncState.value = SyncState(
                     status = SyncState.Status.DONE,
                     deviceName = deviceName,
@@ -229,7 +244,7 @@ class UsbDeviceManager(
                 storageDevice.close()
 
             } catch (e: Exception) {
-                Log.e(TAG, "Sync error", e)
+                AppLog.e("Sync error", e)
                 _syncState.value = SyncState(
                     status = SyncState.Status.ERROR,
                     error = e.message ?: "Unknown error"
@@ -288,7 +303,7 @@ class UsbDeviceManager(
 
         // Preserve file length
         if (destFile.length() != usbFile.length) {
-            Log.w(TAG, "Size mismatch for $relativePath: expected ${usbFile.length}, got ${destFile.length()}")
+            AppLog.w("Size mismatch for $relativePath: expected ${usbFile.length}, got ${destFile.length()}")
         }
     }
 }

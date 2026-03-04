@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Environment
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -38,6 +39,7 @@ class SyncRepository(private val context: Context) {
     private companion object {
         val DEVICES_KEY = stringPreferencesKey("devices")
         val SYNC_LOG_KEY = stringPreferencesKey("sync_log")
+        val DEBUG_LOG_KEY = booleanPreferencesKey("debug_log_enabled")
     }
 
     // --- Device Configs ---
@@ -73,6 +75,18 @@ class SyncRepository(private val context: Context) {
             recursive = true
         )
     )
+
+    // --- Debug Logging ---
+
+    val debugLogEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[DEBUG_LOG_KEY] ?: true // enabled by default
+    }
+
+    suspend fun setDebugLogEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[DEBUG_LOG_KEY] = enabled
+        }
+    }
 
     // --- Sync Log ---
 

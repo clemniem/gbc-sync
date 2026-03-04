@@ -58,6 +58,7 @@ class UsbDeviceManager(
         const val ACTION_USB_PERMISSION = "com.gbcsync.app.USB_PERMISSION"
         private const val MAX_INIT_RETRIES = 3
         private const val INIT_RETRY_DELAY_MS = 1000L
+        private const val BRIDGE_RETRY_DELAY_MS = 4000L
     }
 
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
@@ -257,7 +258,9 @@ class UsbDeviceManager(
 
     /**
      * 2bitBridge sync flow (vendor=9114, product=51966).
-     * Tries libaums first, then extracted connection, then fresh connection as last resort.
+     * Uses libaums with retry logic (close + reinit on failure).
+     * At commit 943ecd1 this was proven to connect and list files on retry.
+     * File reading via libaums still fails — that's the next thing to fix.
      */
     private suspend fun syncBridge(
         storageDevice: UsbMassStorageDevice,
@@ -265,69 +268,65 @@ class UsbDeviceManager(
         destDir: File,
         deviceName: String
     ) {
-        // Step 1: Try libaums
-        AppLog.i("[Bridge] Attempting libaums init...")
-        try {
-            storageDevice.init()
-            val partition = storageDevice.partitions.firstOrNull()
-            if (partition != null) {
-                val fs = partition.fileSystem
-                AppLog.i("[Bridge] libaums OK: ${fs.volumeLabel}, capacity=${fs.capacity}")
-                syncWithLibaums(storageDevice, fs, config, destDir, deviceName)
-                AppLog.i("[Bridge] Sync complete via libaums")
-                return
-            } else {
-                AppLog.w("[Bridge] libaums failed: no partitions found")
-            }
-        } catch (e: Exception) {
-            AppLog.w("[Bridge] libaums failed: ${e.message}")
-        }
-
-        // Step 2: Extract connection from libaums (don't close — that kills the connection)
-        AppLog.i("[Bridge] Extracting connection from libaums for raw SCSI...")
-        val blockDevice = extractBlockDeviceFromLibaums(storageDevice)
-
-        if (blockDevice != null) {
+        // Step 1: Try libaums with retries (wait for RP2040 boot + close/reinit on failure)
+        var initSuccess = false
+        for (attempt in 1..MAX_INIT_RETRIES) {
             try {
-                val partitionOffset = findPartitionOffset(blockDevice)
-                AppLog.d("[Bridge] Partition offset: $partitionOffset")
-                val fatReader = Fat12Reader(blockDevice, partitionOffset)
-                syncWithFatReader(fatReader, config, destDir, deviceName)
-                AppLog.i("[Bridge] Sync complete via extracted connection")
-                return
+                _syncState.value = SyncState(
+                    status = SyncState.Status.CONNECTING,
+                    deviceName = deviceName,
+                    currentFile = "Waiting for Bridge to be ready... (${BRIDGE_RETRY_DELAY_MS / 1000}s)"
+                )
+                AppLog.d("[Bridge] Waiting ${BRIDGE_RETRY_DELAY_MS}ms for RP2040 before attempt $attempt...")
+                delay(BRIDGE_RETRY_DELAY_MS)
+
+                AppLog.i("[Bridge] libaums init attempt $attempt/$MAX_INIT_RETRIES...")
+                _syncState.value = _syncState.value.copy(
+                    currentFile = "Connecting to Bridge... (attempt $attempt)"
+                )
+                storageDevice.init()
+                initSuccess = true
+                AppLog.i("[Bridge] libaums init OK on attempt $attempt")
+                break
             } catch (e: Exception) {
-                AppLog.e("[Bridge] Extraction sync error: ${e.message}")
+                AppLog.w("[Bridge] Init attempt $attempt failed: ${e.message}")
+                try { storageDevice.close() } catch (_: Exception) {}
+                if (attempt < MAX_INIT_RETRIES) {
+                    _syncState.value = SyncState(
+                        status = SyncState.Status.CONNECTING,
+                        deviceName = deviceName,
+                        currentFile = "Waiting for Bridge to recover... (${BRIDGE_RETRY_DELAY_MS / 1000}s)"
+                    )
+                    AppLog.d("[Bridge] Waiting ${BRIDGE_RETRY_DELAY_MS}ms before retry...")
+                    delay(BRIDGE_RETRY_DELAY_MS)
+                }
             }
-        } else {
-            AppLog.w("[Bridge] Extraction failed")
         }
 
-        // Step 3: Fresh connection as last resort
-        AppLog.i("[Bridge] Trying fresh connection as last resort...")
-        try { storageDevice.close() } catch (_: Exception) {}
-
-        val freshDevice = getRawBlockDeviceFresh(storageDevice.usbDevice)
-        if (freshDevice == null) {
-            AppLog.e("[Bridge] Cannot access block device via fresh connection")
+        if (!initSuccess) {
+            AppLog.e("[Bridge] Failed to initialize after $MAX_INIT_RETRIES attempts")
             _syncState.value = SyncState(
                 status = SyncState.Status.ERROR,
-                error = "Cannot access USB device. Try unplugging and re-plugging."
+                error = "Failed to initialize USB device after $MAX_INIT_RETRIES attempts. Try unplugging and re-plugging."
             )
             return
         }
 
-        try {
-            val partitionOffset = findPartitionOffset(freshDevice)
-            AppLog.d("[Bridge] Partition offset: $partitionOffset")
-            val fatReader = Fat12Reader(freshDevice, partitionOffset)
-            syncWithFatReader(fatReader, config, destDir, deviceName)
-            AppLog.i("[Bridge] Sync complete via fresh connection")
-        } catch (e: Exception) {
-            AppLog.e("[Bridge] FAT reader sync error", e)
+        // Step 2: Use libaums filesystem
+        val partition = storageDevice.partitions.firstOrNull()
+        if (partition == null) {
+            AppLog.e("[Bridge] No partitions found after successful init")
             _syncState.value = SyncState(
-                status = SyncState.Status.ERROR, error = e.message ?: "Unknown error"
+                status = SyncState.Status.ERROR,
+                error = "No partitions found on device."
             )
+            return
         }
+
+        val fs = partition.fileSystem
+        AppLog.i("[Bridge] libaums filesystem: ${fs.volumeLabel}, capacity=${fs.capacity}, chunkSize=${fs.chunkSize}")
+        syncWithLibaums(storageDevice, fs, config, destDir, deviceName)
+        AppLog.i("[Bridge] Sync complete via libaums")
     }
 
     // --- libaums sync path (FAT32 with partition table) ---

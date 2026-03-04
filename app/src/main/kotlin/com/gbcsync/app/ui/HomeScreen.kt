@@ -221,6 +221,13 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
             if (syncState.status == SyncState.Status.CONNECTING) {
                 Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                if (syncState.currentFile.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = syncState.currentFile,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
 
             if (syncState.status == SyncState.Status.SYNCING) {

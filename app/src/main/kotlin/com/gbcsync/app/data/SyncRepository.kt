@@ -69,7 +69,7 @@ class SyncRepository(private val context: Context) {
             name = "2bitBridge",
             vendorId = 9114,
             productId = 51966,
-            fileFilter = "*",
+            fileFilter = "*.png",
             recursive = true
         )
     )

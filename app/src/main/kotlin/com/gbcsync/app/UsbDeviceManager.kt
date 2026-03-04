@@ -21,6 +21,9 @@ import me.jahnen.libaums.core.UsbMassStorageDevice
 import me.jahnen.libaums.core.fs.UsbFile
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class SyncState(
     val status: Status = Status.IDLE,
@@ -169,10 +172,11 @@ class UsbDeviceManager(
                 val filesToCopy = mutableListOf<Pair<UsbFile, String>>()
                 collectFiles(root, "", config.fileFilter, config.recursive, filesToCopy)
 
-                // Filter out already-synced files
+                // Filter out already-synced files (.sav files always copy with timestamp)
                 val newFiles = filesToCopy.filter { (usbFile, relativePath) ->
                     val fileName = if (relativePath.isNotEmpty()) relativePath else usbFile.name
-                    repository.shouldCopyFile(fileName, usbFile.length, destDir)
+                    if (fileName.lowercase().endsWith(".sav")) true
+                    else repository.shouldCopyFile(fileName, usbFile.length, destDir)
                 }
 
                 _syncState.value = _syncState.value.copy(totalFiles = newFiles.size)
@@ -192,7 +196,8 @@ class UsbDeviceManager(
                 val chunkSize = fs.chunkSize
 
                 for ((usbFile, relativePath) in newFiles) {
-                    val targetPath = if (relativePath.isNotEmpty()) relativePath else usbFile.name
+                    val originalPath = if (relativePath.isNotEmpty()) relativePath else usbFile.name
+                    val targetPath = addTimestampIfSav(originalPath)
                     _syncState.value = _syncState.value.copy(currentFile = targetPath)
 
                     try {
@@ -254,6 +259,13 @@ class UsbDeviceManager(
                 }
             }
         }
+    }
+
+    private fun addTimestampIfSav(path: String): String {
+        if (!path.lowercase().endsWith(".sav")) return path
+        val timestamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
+        val dot = path.lastIndexOf('.')
+        return "${path.substring(0, dot)}_$timestamp${path.substring(dot)}"
     }
 
     private fun copyFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int, fs: me.jahnen.libaums.core.fs.FileSystem) {

@@ -1,0 +1,193 @@
+package com.gbcsync.app.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.UsbOff
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.gbcsync.app.SyncState
+import com.gbcsync.app.data.SyncLogEntry
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeScreen(
+    syncState: SyncState,
+    connectedDevice: String?,
+    syncLog: List<SyncLogEntry>,
+    onNavigateToSettings: () -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("GBC Sync") },
+                actions = {
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
+        ) {
+            // Connection Status
+            ConnectionStatusCard(connectedDevice, syncState)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Sync Log
+            Text(
+                text = "Sync History",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (syncLog.isEmpty()) {
+                Text(
+                    text = "No files synced yet. Connect a USB device to start.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                LazyColumn {
+                    items(syncLog) { entry ->
+                        SyncLogItem(entry)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when (syncState.status) {
+                SyncState.Status.IDLE -> if (connectedDevice != null)
+                    MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant
+                SyncState.Status.CONNECTING -> MaterialTheme.colorScheme.primaryContainer
+                SyncState.Status.SYNCING -> MaterialTheme.colorScheme.primaryContainer
+                SyncState.Status.DONE -> MaterialTheme.colorScheme.secondaryContainer
+                SyncState.Status.ERROR -> MaterialTheme.colorScheme.errorContainer
+            }
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = when {
+                        syncState.status == SyncState.Status.ERROR -> Icons.Default.Error
+                        syncState.status == SyncState.Status.DONE -> Icons.Default.CheckCircle
+                        connectedDevice != null -> Icons.Default.Usb
+                        else -> Icons.Default.UsbOff
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = when (syncState.status) {
+                        SyncState.Status.IDLE -> connectedDevice ?: "No device connected"
+                        SyncState.Status.CONNECTING -> "Connecting to ${syncState.deviceName}..."
+                        SyncState.Status.SYNCING -> "Syncing from ${syncState.deviceName}..."
+                        SyncState.Status.DONE -> when {
+                            syncState.filesCopied == 0 -> "All files up to date"
+                            else -> "Done! Copied ${syncState.filesCopied} file(s)"
+                        }
+                        SyncState.Status.ERROR -> "Error: ${syncState.error}"
+                    },
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
+
+            if (syncState.status == SyncState.Status.SYNCING) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { syncState.progress },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${syncState.filesCopied}/${syncState.totalFiles}: ${syncState.currentFile}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SyncLogItem(entry: SyncLogEntry) {
+    val dateFormat = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.fileName,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                text = "${entry.deviceName} - ${formatFileSize(entry.fileSize)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Text(
+            text = dateFormat.format(Date(entry.timestamp)),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    return when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+        else -> "${"%.1f".format(bytes / (1024.0 * 1024.0))} MB"
+    }
+}

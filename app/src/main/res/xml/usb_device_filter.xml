@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Match all USB mass storage devices (class 8 = mass storage) -->
+    <!-- Specific device filtering is done in app via Settings -->
+    <usb-device class="8" />
+</resources>

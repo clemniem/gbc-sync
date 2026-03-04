@@ -196,7 +196,7 @@ class UsbDeviceManager(
                     _syncState.value = _syncState.value.copy(currentFile = targetPath)
 
                     try {
-                        copyFile(usbFile, destDir, targetPath, chunkSize)
+                        copyFile(usbFile, destDir, targetPath, chunkSize, fs)
                         copied++
 
                         repository.addSyncLogEntry(
@@ -256,7 +256,7 @@ class UsbDeviceManager(
         }
     }
 
-    private fun copyFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int) {
+    private fun copyFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int, fs: me.jahnen.libaums.core.fs.FileSystem) {
         val destFile = File(destDir, relativePath)
         destFile.parentFile?.mkdirs()
 
@@ -265,7 +265,7 @@ class UsbDeviceManager(
             fos.channel.truncate(0)
 
             val buffer = ByteArray(chunkSize)
-            val inputStream = me.jahnen.libaums.core.fs.UsbFileStreamFactory.createBufferedInputStream(usbFile, usbFile.fileSystem)
+            val inputStream = me.jahnen.libaums.core.fs.UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
             inputStream.use { input ->
                 var bytesRead: Int
                 while (input.read(buffer).also { bytesRead = it } != -1) {

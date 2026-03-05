@@ -1,6 +1,6 @@
 # GBC Sync
 
-Android app that auto-syncs files from Game Boy Camera cart readers (JoeyJr, 2bitBridge) to your phone. Works on any Android device with USB Host (OTG) support. Uses [libaums](https://github.com/magnusja/libaums) to read FAT filesystems directly via USB Host API, bypassing Android's kernel USB mass storage driver.
+Android app that auto-syncs files from Game Boy Camera cart readers (JoeyJr, PicNRec) to your phone. Works on any Android device with USB Host (OTG) support. Uses [libaums](https://github.com/magnusja/libaums) to read FAT filesystems directly via USB Host API, bypassing Android's kernel USB mass storage driver.
 
 ## How it works
 
@@ -84,7 +84,7 @@ adb shell lsusb
 | Device | USB Name | Vendor ID | Product ID |
 |--------|----------|-----------|------------|
 | JoeyJr | Dragon Drop FRAM cart | 49745 | 8224 |
-| 2bitBridge | XIAO RP2040 | 9114 | 51966 |
+| PicNRec (2bitBridge) | XIAO RP2040 | 9114 | 51966 |
 
 These are preconfigured as defaults in the app.
 
@@ -93,7 +93,7 @@ These are preconfigured as defaults in the app.
 | Device | Filter | Recursive | Behavior |
 |--------|--------|-----------|----------|
 | JoeyJr | `*.sav` | No | Copies save files into `<infix>/` subfolder with timestamped names |
-| 2bitBridge | `*.png` | Yes | Copies photos into timestamped import folder, preserving original folder structure |
+| PicNRec | `*.png` | Yes | Copies photos into timestamped import folder, preserving original folder structure |
 
 Files are saved to `Documents/GBCSync/<device-name>/` on the phone.
 
@@ -110,7 +110,7 @@ The app identifies which camera a cartridge belongs to and organizes files accor
 | Game Boy Camera (Atomic Purple) | `pur` | Manual picker |
 | MiniCam (PhotoRom) | `mip` | Auto-detected (ROM.GBC on cart) |
 | MiniCam (GBCRom) | `mis` | Manual picker |
-| PicNRec | `pic` | Auto-detected (2bitBridge device) |
+| PicNRec | `pic` | Auto-detected (PicNRec device) |
 
 Configure which cameras you own in **Settings → My Gear**. Custom cameras (e.g. Cam+) can be added with a custom name and infix. All infixes are editable.
 

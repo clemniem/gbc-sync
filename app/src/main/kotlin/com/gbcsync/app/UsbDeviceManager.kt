@@ -7,7 +7,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
-import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
@@ -15,14 +14,15 @@ import com.gbcsync.app.data.AppLog
 import com.gbcsync.app.data.DeviceConfig
 import com.gbcsync.app.data.SyncLogEntry
 import com.gbcsync.app.data.SyncRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import me.jahnen.libaums.core.UsbMassStorageDevice
 import me.jahnen.libaums.core.driver.BlockDeviceDriver
 import me.jahnen.libaums.core.fs.FileSystem
@@ -35,10 +35,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-data class ImportChoice(
-    val message: String,
-    val existingFolder: String // the folder name to continue, or "" for new
-)
+data class ImportChoice(val message: String)
 
 data class SyncState(
     val status: Status = Status.IDLE,
@@ -64,13 +61,16 @@ class UsbDeviceManager(
     companion object {
         const val ACTION_USB_PERMISSION = "com.gbcsync.app.USB_PERMISSION"
         private const val MAX_INIT_RETRIES = 3
-        private const val INIT_RETRY_DELAY_MS = 1000L
-        private const val BRIDGE_RETRY_DELAY_MS = 4000L
+        private const val BRIDGE_VENDOR_ID = 9114
+        private const val BRIDGE_PRODUCT_ID = 51966
+        private const val BRIDGE_BOOT_DELAY_MS = 4000L
+        private const val BRIDGE_RECONNECT_DELAY_MS = 2000L
         private const val BRIDGE_FILE_DELAY_MS = 250L
+        private const val BRIDGE_RECENT_IMPORT_WINDOW_MS = 60 * 60 * 1000L
     }
 
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-    private val syncLock = kotlinx.coroutines.sync.Mutex()
+    private val syncLock = Mutex()
     private var importChoiceDeferred: CompletableDeferred<Boolean>? = null // true = continue existing, false = new
 
     /** Called from UI when user chooses to continue existing import */
@@ -83,6 +83,17 @@ class UsbDeviceManager(
     fun onNewImport() {
         _syncState.value = _syncState.value.copy(importChoice = null)
         importChoiceDeferred?.complete(false)
+    }
+
+    private fun requestPermission(device: UsbDevice) {
+        val intent = PendingIntent.getBroadcast(
+            context, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_MUTABLE
+        )
+        usbManager.requestPermission(device, intent)
+    }
+
+    private fun UsbMassStorageDevice.closeSafely() {
+        try { close() } catch (_: Exception) {}
     }
 
     private val _syncState = MutableStateFlow(SyncState())
@@ -163,12 +174,7 @@ class UsbDeviceManager(
 
             if (!usbManager.hasPermission(usbDevice)) {
                 AppLog.d("Requesting USB permission...")
-                val permissionIntent = PendingIntent.getBroadcast(
-                    context, 0,
-                    Intent(ACTION_USB_PERMISSION),
-                    PendingIntent.FLAG_MUTABLE
-                )
-                usbManager.requestPermission(usbDevice, permissionIntent)
+                requestPermission(usbDevice)
                 return
             }
 
@@ -213,19 +219,14 @@ class UsbDeviceManager(
 
             if (!usbManager.hasPermission(usbDev)) {
                 AppLog.w("USB permission lost, re-requesting...")
-                val permissionIntent = PendingIntent.getBroadcast(
-                    context, 0,
-                    Intent(ACTION_USB_PERMISSION),
-                    PendingIntent.FLAG_MUTABLE
-                )
-                usbManager.requestPermission(usbDev, permissionIntent)
+                requestPermission(usbDev)
                 return
             }
 
             AppLog.i("=== SYNC START: $deviceName (vendor=${usbDev.vendorId}, product=${usbDev.productId}) ===")
 
             when {
-                config.vendorId == 9114 && config.productId == 51966 ->
+                config.vendorId == BRIDGE_VENDOR_ID && config.productId == BRIDGE_PRODUCT_ID ->
                     syncBridge(storageDevice, config, destDir, deviceName)
                 else ->
                     syncJoeyJr(storageDevice, config, destDir, deviceName)
@@ -264,7 +265,7 @@ class UsbDeviceManager(
 
         // Step 2: Fall back to raw SCSI with fresh connection
         AppLog.i("[JoeyJr] Falling back to raw SCSI...")
-        try { storageDevice.close() } catch (_: Exception) {}
+        storageDevice.closeSafely()
 
         val freshDevice = getRawBlockDeviceFresh(storageDevice.usbDevice)
         if (freshDevice == null) {
@@ -302,46 +303,27 @@ class UsbDeviceManager(
         destDir: File,
         deviceName: String
     ) {
-        // Check for recent import folder (within 60 minutes)
+        // Check for recent import folder
         val importDir: File
         val dateFormat = SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US)
-        val now = System.currentTimeMillis()
-        val recentFolder = destDir.listFiles()
-            ?.filter { it.isDirectory }
-            ?.mapNotNull { dir ->
-                try {
-                    val folderTime = dateFormat.parse(dir.name)?.time ?: return@mapNotNull null
-                    if (now - folderTime < 60 * 60 * 1000) dir to folderTime else null
-                } catch (_: Exception) { null }
-            }
-            ?.maxByOrNull { it.second }
-            ?.first
+        val recentFolder = findRecentImportFolder(destDir, dateFormat)
 
         if (recentFolder != null) {
             val fileCount = recentFolder.listFiles()?.size ?: 0
             AppLog.i("[Bridge] Found recent import: ${recentFolder.name} ($fileCount files)")
             importChoiceDeferred = CompletableDeferred()
             _syncState.value = _syncState.value.copy(
-                importChoice = ImportChoice(
-                    message = "Continue import \"${recentFolder.name}\" ($fileCount files already)?",
-                    existingFolder = recentFolder.name
-                )
+                importChoice = ImportChoice("Continue import \"${recentFolder.name}\" ($fileCount files already)?")
             )
             val continueExisting = importChoiceDeferred!!.await()
             if (continueExisting) {
                 importDir = recentFolder
                 AppLog.i("[Bridge] Continuing import: ${importDir.name}")
             } else {
-                val importTimestamp = dateFormat.format(Date())
-                importDir = File(destDir, importTimestamp)
-                importDir.mkdirs()
-                AppLog.i("[Bridge] New import folder: ${importDir.name}")
+                importDir = createImportFolder(destDir, dateFormat)
             }
         } else {
-            val importTimestamp = dateFormat.format(Date())
-            importDir = File(destDir, importTimestamp)
-            importDir.mkdirs()
-            AppLog.i("[Bridge] Import folder: ${importDir.name}")
+            importDir = createImportFolder(destDir, dateFormat)
         }
 
         // Pre-populate with files already in import folder (for continued imports)
@@ -360,7 +342,7 @@ class UsbDeviceManager(
 
         for (round in 1..20) { // max 20 reconnection rounds
             // Step 1: Connect (wait for RP2040 boot on first round, shorter on reconnects)
-            val waitMs = if (round == 1) BRIDGE_RETRY_DELAY_MS else 2000L
+            val waitMs = if (round == 1) BRIDGE_BOOT_DELAY_MS else BRIDGE_RECONNECT_DELAY_MS
             _syncState.value = SyncState(
                 status = SyncState.Status.CONNECTING,
                 deviceName = deviceName,
@@ -375,7 +357,7 @@ class UsbDeviceManager(
                     // Get fresh device handle for reconnection
                     val devices = UsbMassStorageDevice.getMassStorageDevices(context)
                     val found = devices.firstOrNull { d ->
-                        d.usbDevice.vendorId == 9114 && d.usbDevice.productId == 51966
+                        d.usbDevice.vendorId == BRIDGE_VENDOR_ID && d.usbDevice.productId == BRIDGE_PRODUCT_ID
                     }
                     if (found == null) {
                         AppLog.e("[Bridge] Bridge not found on reconnect")
@@ -385,10 +367,7 @@ class UsbDeviceManager(
                     // Check permission (may have been lost on replug)
                     if (!usbManager.hasPermission(currentDevice.usbDevice)) {
                         AppLog.w("[Bridge] Permission lost, re-requesting...")
-                        val permissionIntent = PendingIntent.getBroadcast(
-                            context, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_MUTABLE
-                        )
-                        usbManager.requestPermission(currentDevice.usbDevice, permissionIntent)
+                        requestPermission(currentDevice.usbDevice)
                         break // will resume via permission callback
                     }
                 }
@@ -398,7 +377,7 @@ class UsbDeviceManager(
                 consecutiveInitFailures = 0
             } catch (e: Exception) {
                 AppLog.w("[Bridge] Round $round: init failed: ${e.message}")
-                try { currentDevice.close() } catch (_: Exception) {}
+                currentDevice.closeSafely()
                 consecutiveInitFailures++
                 if (consecutiveInitFailures >= maxInitFailures) {
                     AppLog.e("[Bridge] $maxInitFailures consecutive init failures, giving up")
@@ -411,7 +390,7 @@ class UsbDeviceManager(
             val partition = currentDevice.partitions.firstOrNull()
             if (partition == null) {
                 AppLog.w("[Bridge] Round $round: no partitions")
-                try { currentDevice.close() } catch (_: Exception) {}
+                currentDevice.closeSafely()
                 continue
             }
 
@@ -429,13 +408,13 @@ class UsbDeviceManager(
             }
 
             if (round == 1) {
-                totalFiles = newFiles.size
-                AppLog.i("[Bridge] ${newFiles.size} file(s) to copy")
+                totalFiles = newFiles.size + copiedFiles.size
+                AppLog.i("[Bridge] ${newFiles.size} file(s) to copy (${copiedFiles.size} already done)")
             }
 
             if (newFiles.isEmpty()) {
                 AppLog.i("[Bridge] All files copied!")
-                try { currentDevice.close() } catch (_: Exception) {}
+                currentDevice.closeSafely()
                 break
             }
 
@@ -447,11 +426,10 @@ class UsbDeviceManager(
             )
 
             // Step 4: Copy files one at a time, stop on first error and reconnect
-            val currentDelayMs = BRIDGE_FILE_DELAY_MS
             val chunkSize = fs.chunkSize
             var errorInRound = false
             var copiedThisRound = 0
-            AppLog.i("[Bridge] Round $round: ${newFiles.size} files remaining, delay=${currentDelayMs}ms")
+            AppLog.i("[Bridge] Round $round: ${newFiles.size} files remaining, delay=${BRIDGE_FILE_DELAY_MS}ms")
 
             for ((usbFile, relativePath) in newFiles) {
                 val originalPath = if (relativePath.isNotEmpty()) relativePath else usbFile.name
@@ -460,7 +438,7 @@ class UsbDeviceManager(
 
                 try {
                     AppLog.d("[Bridge] Copying $targetPath (${usbFile.length} bytes)...")
-                    copyLibaumsFile(usbFile, importDir, targetPath, chunkSize, fs)
+                    copyLibaumsFile(usbFile, importDir, targetPath, chunkSize, fs, skipClose = true)
 
                     // Verify file was actually written with content
                     val destFile = File(importDir, targetPath)
@@ -473,12 +451,12 @@ class UsbDeviceManager(
 
                     copiedFiles.add(originalPath)
                     copiedThisRound++
-                    AppLog.d("[Bridge] Copied $targetPath OK (#$copiedThisRound this round, delay=${currentDelayMs}ms)")
+                    AppLog.d("[Bridge] Copied $targetPath OK (#$copiedThisRound this round, delay=${BRIDGE_FILE_DELAY_MS}ms)")
                     logSyncEntry(targetPath, deviceName, usbFile.length)
                     _syncState.value = _syncState.value.copy(filesCopied = copiedFiles.size)
 
                     // Give RP2040 time to recover between files
-                    if (currentDelayMs > 0) delay(currentDelayMs)
+                    delay(BRIDGE_FILE_DELAY_MS)
                 } catch (e: Exception) {
                     AppLog.w("[Bridge] Error copying $targetPath: ${e.message}")
                     // Delete partial file
@@ -489,14 +467,14 @@ class UsbDeviceManager(
             }
 
             // Clean up connection before reconnecting
-            try { currentDevice.close() } catch (_: Exception) {}
+            currentDevice.closeSafely()
 
             if (!errorInRound) {
-                AppLog.i("[Bridge] Round $round finished without errors (delay=${currentDelayMs}ms)")
+                AppLog.i("[Bridge] Round $round finished without errors (delay=${BRIDGE_FILE_DELAY_MS}ms)")
                 break
             }
 
-            AppLog.i("[Bridge] Round $round: $copiedThisRound copied this round, ${copiedFiles.size}/$totalFiles total, delay=${currentDelayMs}ms, reconnecting...")
+            AppLog.i("[Bridge] Round $round: $copiedThisRound copied this round, ${copiedFiles.size}/$totalFiles total, delay=${BRIDGE_FILE_DELAY_MS}ms, reconnecting...")
         }
 
         // Final status
@@ -516,8 +494,7 @@ class UsbDeviceManager(
         fs: FileSystem,
         config: DeviceConfig,
         destDir: File,
-        deviceName: String,
-        perFileDelayMs: Long = 0
+        deviceName: String
     ) {
         try {
             AppLog.i("Syncing $deviceName -> ${destDir.absolutePath}")
@@ -563,7 +540,6 @@ class UsbDeviceManager(
                     AppLog.d("Copied $targetPath OK")
                     logSyncEntry(targetPath, deviceName, usbFile.length)
                     _syncState.value = _syncState.value.copy(filesCopied = copied)
-                    if (perFileDelayMs > 0) delay(perFileDelayMs)
                 } catch (e: Exception) {
                     errors++
                     AppLog.e("Error copying $targetPath", e)
@@ -576,7 +552,7 @@ class UsbDeviceManager(
         } catch (e: Exception) {
             AppLog.e("Sync error", e)
             _syncState.value = SyncState(status = SyncState.Status.ERROR, error = e.message ?: "Unknown error")
-            try { storageDevice.close() } catch (_: Exception) {}
+            storageDevice.closeSafely()
         }
     }
 
@@ -642,6 +618,27 @@ class UsbDeviceManager(
     }
 
     // --- Shared helpers ---
+
+    private fun findRecentImportFolder(destDir: File, dateFormat: SimpleDateFormat): File? {
+        val now = System.currentTimeMillis()
+        return destDir.listFiles()
+            ?.filter { it.isDirectory }
+            ?.mapNotNull { dir ->
+                try {
+                    val folderTime = dateFormat.parse(dir.name)?.time ?: return@mapNotNull null
+                    if (now - folderTime < BRIDGE_RECENT_IMPORT_WINDOW_MS) dir to folderTime else null
+                } catch (_: Exception) { null }
+            }
+            ?.maxByOrNull { it.second }
+            ?.first
+    }
+
+    private fun createImportFolder(destDir: File, dateFormat: SimpleDateFormat): File {
+        val dir = File(destDir, dateFormat.format(Date()))
+        dir.mkdirs()
+        AppLog.i("[Bridge] New import folder: ${dir.name}")
+        return dir
+    }
 
     private suspend fun logSyncEntry(targetPath: String, deviceName: String, fileSize: Long) {
         try {
@@ -773,115 +770,6 @@ class UsbDeviceManager(
     }
 
     /**
-     * Extracts the working USB connection from libaums's internal objects via reflection.
-     * libaums's connection successfully communicates with the device (INQUIRY data was received),
-     * even though its parser crashes on truncated responses. We reuse that exact connection
-     * for our raw SCSI implementation instead of opening a fresh one (which doesn't work
-     * with RP2040/TinyUSB devices).
-     */
-    private fun extractBlockDeviceFromLibaums(storageDevice: UsbMassStorageDevice): RawScsiBlockDevice? {
-        try {
-            // Step 1: Get the private usbCommunication field from UsbMassStorageDevice
-            val commField = storageDevice.javaClass.getDeclaredField("usbCommunication")
-            commField.isAccessible = true
-            val communication = commField.get(storageDevice)
-            if (communication == null) {
-                AppLog.w("usbCommunication field is null")
-                return null
-            }
-            AppLog.d("Got usbCommunication: ${communication.javaClass.name}")
-
-            // Step 2: Get deviceConnection from AndroidUsbCommunication (parent class)
-            // Walk up the class hierarchy to find the field
-            var connectionField: java.lang.reflect.Field? = null
-            var clazz: Class<*>? = communication.javaClass
-            while (clazz != null && connectionField == null) {
-                try {
-                    connectionField = clazz.getDeclaredField("deviceConnection")
-                } catch (_: NoSuchFieldException) {
-                    clazz = clazz.superclass
-                }
-            }
-            if (connectionField == null) {
-                AppLog.w("Could not find deviceConnection field in ${communication.javaClass.name}")
-                return null
-            }
-            connectionField.isAccessible = true
-            val connection = connectionField.get(communication) as? UsbDeviceConnection
-            if (connection == null) {
-                AppLog.w("deviceConnection is null")
-                return null
-            }
-            AppLog.d("Got UsbDeviceConnection from libaums")
-
-            // Step 3: Get endpoints and interface
-            var outEp: UsbEndpoint? = null
-            var inEp: UsbEndpoint? = null
-            var usbIface: UsbInterface? = null
-
-            // Try getter methods first (AndroidUsbCommunication has these)
-            try {
-                val getOut = communication.javaClass.getMethod("getOutEndpoint")
-                val getIn = communication.javaClass.getMethod("getInEndpoint")
-                val getIface = communication.javaClass.getMethod("getUsbInterface")
-                outEp = getOut.invoke(communication) as? UsbEndpoint
-                inEp = getIn.invoke(communication) as? UsbEndpoint
-                usbIface = getIface.invoke(communication) as? UsbInterface
-            } catch (e: Exception) {
-                AppLog.d("Getter methods failed, trying fields: ${e.message}")
-            }
-
-            // Fallback: try field access
-            if (outEp == null || inEp == null) {
-                var c: Class<*>? = communication.javaClass
-                while (c != null && (outEp == null || inEp == null)) {
-                    for (f in c.declaredFields) {
-                        f.isAccessible = true
-                        when (f.name) {
-                            "outEndpoint" -> outEp = f.get(communication) as? UsbEndpoint
-                            "inEndpoint" -> inEp = f.get(communication) as? UsbEndpoint
-                            "usbInterface" -> usbIface = f.get(communication) as? UsbInterface
-                        }
-                    }
-                    c = c.superclass
-                }
-            }
-
-            if (outEp == null || inEp == null) {
-                AppLog.w("Could not extract endpoints from libaums")
-                return null
-            }
-            AppLog.d("Got endpoints: OUT=${outEp.address}, IN=${inEp.address}, interface=${usbIface?.id}")
-
-            // Step 4: Drain any stale data from IN endpoint (e.g. CSW from failed INQUIRY)
-            val drain = ByteArray(64)
-            var drained = 0
-            while (true) {
-                val r = connection.bulkTransfer(inEp, drain, drain.size, 100)
-                if (r <= 0) break
-                drained += r
-                AppLog.d("Drained $r stale bytes from IN endpoint")
-            }
-            if (drained > 0) AppLog.i("Drained $drained total stale bytes")
-
-            // Step 5: Create RawScsiBlockDevice with the extracted connection
-            val device = RawScsiBlockDevice(connection, outEp, inEp, usbIface?.id ?: 0)
-            device.init()
-
-            if (device.initialized) {
-                AppLog.i("RawScsiBlockDevice ready via libaums connection: blockSize=${device.blockSize}")
-                return device
-            } else {
-                AppLog.w("RawScsiBlockDevice init failed via libaums connection")
-                return null
-            }
-        } catch (e: Exception) {
-            AppLog.e("Failed to extract connection from libaums: ${e.message}")
-            return null
-        }
-    }
-
-    /**
      * Reads block 0 to check for MBR partition table.
      * Returns the block offset of the first partition, or 0 for superfloppy.
      */
@@ -937,7 +825,12 @@ class UsbDeviceManager(
         return "${path.substring(0, dot)}_$timestamp${path.substring(dot)}"
     }
 
-    private fun copyLibaumsFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int, fs: FileSystem) {
+    /**
+     * @param skipClose If true, skips closing the libaums input stream to avoid
+     *   FatFile.flush() sending SCSI WRITE commands that corrupt RP2040 USB state.
+     *   Only needed for Bridge; JoeyJr can close normally.
+     */
+    private fun copyLibaumsFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int, fs: FileSystem, skipClose: Boolean = false) {
         val destFile = File(destDir, relativePath)
         destFile.parentFile?.mkdirs()
 
@@ -945,12 +838,13 @@ class UsbDeviceManager(
             fos.channel.truncate(0)
             val buffer = ByteArray(chunkSize)
             val inputStream = UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
-            // Don't use .use{} — closing the stream triggers FatFile.flush() which
-            // sends SCSI WRITE commands that corrupt the RP2040's USB state.
-            // We read all data then intentionally skip close.
-            var bytesRead: Int
-            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                fos.write(buffer, 0, bytesRead)
+            try {
+                var bytesRead: Int
+                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                    fos.write(buffer, 0, bytesRead)
+                }
+            } finally {
+                if (!skipClose) inputStream.close()
             }
         }
 

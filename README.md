@@ -1,6 +1,6 @@
 # GBC Sync
 
-Android app for Pixel 5 that auto-syncs files from USB drives (JoeyJr, 2bitBridge) to your phone. Uses [libaums](https://github.com/magnusja/libaums) to read FAT32 filesystems directly via USB Host API, bypassing Android's broken kernel FAT32 support on Pixel 5.
+Android app that auto-syncs files from Game Boy Camera cart readers (JoeyJr, 2bitBridge) to your phone. Works on any Android device with USB Host (OTG) support. Uses [libaums](https://github.com/magnusja/libaums) to read FAT filesystems directly via USB Host API, bypassing Android's kernel USB mass storage driver.
 
 ## How it works
 
@@ -9,14 +9,19 @@ Android app for Pixel 5 that auto-syncs files from USB drives (JoeyJr, 2bitBridg
 3. Auto-copies matching files to configured destination folder
 4. Shows progress → done, unplug
 
-Save files (`.sav`) are timestamped on each sync (e.g. `SRAM_2026-03-04_143000.SAV`) to preserve history. Other files use duplicate detection (skip if same name + size).
+Save files (`.sav`) are saved with a timestamp and camera infix (e.g. `grn/2026-03-04_143000-grn.sav`). Other files use duplicate detection (skip if same name + size).
+
+## Compatibility
+
+- Any Android phone/tablet with **USB Host (OTG) support** — most devices running Android 5.0+ (API 21)
+- USB-C or Micro-USB OTG adapter for connecting USB-A cart readers
+- Tested on Pixel 5 (Android 14), but not Pixel-specific
 
 ## Prerequisites
 
 - **JDK 17+** (e.g. `sdk install java 21.0.5-tem`)
 - **Gradle 8.9** (`sdk install gradle 8.9`)
 - **Android SDK** with platform 35 (install via Android Studio or `sdkmanager`)
-- **USB-C OTG adapter** for connecting USB-A devices to Pixel 5
 
 ## Build
 
@@ -38,7 +43,7 @@ sdk.dir=/Users/<you>/Library/Android/sdk
 
 The APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
 
-## Install on Pixel 5
+## Install
 
 ### Enable USB debugging
 
@@ -46,7 +51,7 @@ The APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
 2. Settings → System → Developer options → **USB debugging** ON
 3. Connect phone to computer via USB
 
-### Install
+### Install via adb
 
 ```bash
 adb install app/build/outputs/apk/debug/app-debug.apk
@@ -87,10 +92,27 @@ These are preconfigured as defaults in the app.
 
 | Device | Filter | Recursive | Behavior |
 |--------|--------|-----------|----------|
-| JoeyJr | `*.sav` | No | Copies `SRAM.SAV` with timestamp (e.g. `SRAM_2026-03-04_143000.SAV`) |
-| 2bitBridge | `*.png` | Yes | Copies Game Boy Camera photos from `dcim/1xx_brdg/` folders, skips duplicates |
+| JoeyJr | `*.sav` | No | Copies save files into `<infix>/` subfolder with timestamped names |
+| 2bitBridge | `*.png` | Yes | Copies photos into timestamped import folder, preserving original folder structure |
 
 Files are saved to `Documents/GBCSync/<device-name>/` on the phone.
+
+## Supported cameras
+
+The app identifies which camera a cartridge belongs to and organizes files accordingly.
+
+| Camera | Infix | Detection |
+|--------|-------|-----------|
+| Game Boy Camera (Green) | `grn` | Manual picker |
+| Game Boy Camera (Yellow) | `ylw` | Manual picker |
+| Game Boy Camera (Red) | `red` | Manual picker |
+| Game Boy Camera (Blue) | `blu` | Manual picker |
+| Game Boy Camera (Atomic Purple) | `pur` | Manual picker |
+| MiniCam (PhotoRom) | `mip` | Auto-detected (ROM.GBC on cart) |
+| MiniCam (GBCRom) | `mis` | Manual picker |
+| PicNRec | `pic` | Auto-detected (2bitBridge device) |
+
+Configure which cameras you own in **Settings → My Gear**. Custom cameras (e.g. Cam+) can be added with a custom name and infix. All infixes are editable.
 
 ## Usage
 

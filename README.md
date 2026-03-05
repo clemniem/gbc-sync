@@ -84,7 +84,7 @@ adb shell lsusb
 | Device | USB Name | Vendor ID | Product ID |
 |--------|----------|-----------|------------|
 | JoeyJr | Dragon Drop FRAM cart | 49745 | 8224 |
-| PicNRec (2bitBridge) | XIAO RP2040 | 9114 | 51966 |
+| PicNRec | XIAO RP2040 | 9114 | 51966 |
 
 These are preconfigured as defaults in the app.
 

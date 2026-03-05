@@ -16,6 +16,41 @@ import java.io.File
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "gbc_sync")
 
+/**
+ * Represents a camera that can be selected during sync.
+ * @param displayName shown in UI
+ * @param filePrefix prepended to synced file names
+ */
+data class CameraType(val displayName: String, val filePrefix: String) {
+    companion object {
+        // --- Game Boy Camera colors ---
+        val GB_CAMERA_GREEN = CameraType("Game Boy Camera (Green)", "grn")
+        val GB_CAMERA_YELLOW = CameraType("Game Boy Camera (Yellow)", "ylw")
+        val GB_CAMERA_RED = CameraType("Game Boy Camera (Red)", "red")
+        val GB_CAMERA_BLUE = CameraType("Game Boy Camera (Blue)", "blu")
+        val GB_CAMERA_ATOMIC_PURPLE = CameraType("Game Boy Camera (Atomic Purple)", "pur")
+
+        /** All standard GB Camera color variants */
+        val gbCameraColors = listOf(GB_CAMERA_GREEN, GB_CAMERA_YELLOW, GB_CAMERA_RED, GB_CAMERA_BLUE, GB_CAMERA_ATOMIC_PURPLE)
+
+        // --- MiniCam ---
+        val MINI_CAM_PHOTO_ROM = CameraType("MiniCam (PhotoRom)", "mip")
+        val MINI_CAM_GBC_ROM = CameraType("MiniCam (GBCRom)", "mis")
+
+        // --- PicNRec ---
+        val PIC_N_REC = CameraType("PicNRec", "pic")
+
+        /** Cameras that are auto-detected and should not appear in the picker */
+        val autoDetected = setOf(PIC_N_REC, MINI_CAM_PHOTO_ROM)
+
+        /** All built-in camera types (for Settings display) */
+        val builtIn = gbCameraColors + listOf(MINI_CAM_GBC_ROM, MINI_CAM_PHOTO_ROM, PIC_N_REC)
+
+        /** Create a custom camera entry */
+        fun custom(name: String): CameraType = CameraType(name, name.replace(" ", ""))
+    }
+}
+
 data class DeviceConfig(
     val name: String,
     val vendorId: Int,
@@ -40,6 +75,7 @@ class SyncRepository(private val context: Context) {
         val DEVICES_KEY = stringPreferencesKey("devices")
         val SYNC_LOG_KEY = stringPreferencesKey("sync_log")
         val DEBUG_LOG_KEY = booleanPreferencesKey("debug_log_enabled")
+        val OWNED_CAMERAS_KEY = stringPreferencesKey("owned_cameras")
     }
 
     // --- Device Configs ---
@@ -75,6 +111,30 @@ class SyncRepository(private val context: Context) {
             recursive = true
         )
     )
+
+    // --- Owned Cameras ---
+
+    val ownedCameras: Flow<Set<CameraType>> = context.dataStore.data.map { prefs ->
+        val json = prefs[OWNED_CAMERAS_KEY] ?: return@map emptySet()
+        try {
+            gson.fromJson<Set<CameraType>>(json, object : TypeToken<Set<CameraType>>() {}.type)
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
+    suspend fun saveOwnedCameras(cameras: Set<CameraType>) {
+        context.dataStore.edit { prefs ->
+            prefs[OWNED_CAMERAS_KEY] = gson.toJson(cameras)
+        }
+    }
+
+    /** Returns cameras eligible for the JoeyJr picker (owned minus auto-detected) */
+    fun pickerCameras(owned: Set<CameraType>): List<CameraType> =
+        owned.filter { it !in CameraType.autoDetected }.sortedBy {
+            val builtInIndex = CameraType.builtIn.indexOf(it)
+            if (builtInIndex >= 0) builtInIndex else Int.MAX_VALUE
+        }
 
     // --- Debug Logging ---
 

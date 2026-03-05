@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
                     val devices by repository.deviceConfigs.collectAsState(initial = emptyList())
                     val logLines by AppLog.lines.collectAsState()
                     val debugLogEnabled by repository.debugLogEnabled.collectAsState(initial = true)
+                    val ownedCameras by repository.ownedCameras.collectAsState(initial = emptySet())
 
                     NavHost(navController = navController, startDestination = "home") {
                         composable("home") {
@@ -72,8 +73,27 @@ class MainActivity : ComponentActivity() {
                                 onOpenGbPrinterWeb = {
                                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://herrzatacke.github.io/gb-printer-web/")))
                                 },
+                                onOpenFolder = { path ->
+                                    try {
+                                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                                            setDataAndType(Uri.parse(path), "resource/folder")
+                                        }
+                                        startActivity(intent)
+                                    } catch (_: Exception) {
+                                        // Fallback: open generic file browser
+                                        try {
+                                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                setDataAndType(Uri.parse("content://$path"), "vnd.android.document/directory")
+                                            }
+                                            startActivity(intent)
+                                        } catch (_: Exception) {
+                                            AppLog.w("No file manager found to open folder")
+                                        }
+                                    }
+                                },
                                 onContinueImport = { usbManager.onContinueImport() },
-                                onNewImport = { usbManager.onNewImport() }
+                                onNewImport = { usbManager.onNewImport() },
+                                onCameraChosen = { usbManager.onCameraChosen(it) }
                             )
                         }
                         composable("settings") {
@@ -82,6 +102,12 @@ class MainActivity : ComponentActivity() {
                                 onDevicesChanged = { updated ->
                                     lifecycleScope.launch {
                                         repository.saveDeviceConfigs(updated)
+                                    }
+                                },
+                                ownedCameras = ownedCameras,
+                                onOwnedCamerasChanged = { updated ->
+                                    lifecycleScope.launch {
+                                        repository.saveOwnedCameras(updated)
                                     }
                                 },
                                 debugLogEnabled = debugLogEnabled,

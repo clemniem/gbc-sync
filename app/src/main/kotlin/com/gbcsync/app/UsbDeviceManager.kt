@@ -11,6 +11,7 @@ import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import com.gbcsync.app.data.AppLog
+import com.gbcsync.app.data.CameraType
 import com.gbcsync.app.data.DeviceConfig
 import com.gbcsync.app.data.SyncLogEntry
 import com.gbcsync.app.data.SyncRepository
@@ -45,7 +46,11 @@ data class SyncState(
     val totalFiles: Int = 0,
     val errors: Int = 0,
     val error: String? = null,
-    val importChoice: ImportChoice? = null // non-null = show dialog
+    val importChoice: ImportChoice? = null, // non-null = show dialog
+    val cameraChoice: List<CameraType>? = null, // non-null = show camera picker
+    val targetFolder: String = "",
+    val durationMs: Long = 0,
+    val safeToDisconnect: Boolean = false
 ) {
     enum class Status { IDLE, CONNECTING, SYNCING, DONE, ERROR }
 
@@ -72,6 +77,7 @@ class UsbDeviceManager(
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
     private val syncLock = Mutex()
     private var importChoiceDeferred: CompletableDeferred<Boolean>? = null // true = continue existing, false = new
+    private var cameraChoiceDeferred: CompletableDeferred<CameraType>? = null
 
     /** Called from UI when user chooses to continue existing import */
     fun onContinueImport() {
@@ -83,6 +89,12 @@ class UsbDeviceManager(
     fun onNewImport() {
         _syncState.value = _syncState.value.copy(importChoice = null)
         importChoiceDeferred?.complete(false)
+    }
+
+    /** Called from UI when user picks a camera type */
+    fun onCameraChosen(camera: CameraType) {
+        _syncState.value = _syncState.value.copy(cameraChoice = null)
+        cameraChoiceDeferred?.complete(camera)
     }
 
     private fun requestPermission(device: UsbDevice) {
@@ -253,7 +265,13 @@ class UsbDeviceManager(
             if (partition != null) {
                 val fs = partition.fileSystem
                 AppLog.i("[JoeyJr] libaums OK: ${fs.volumeLabel}, capacity=${fs.capacity}")
-                syncWithLibaums(storageDevice, fs, config, destDir, deviceName)
+
+                // Detect camera type
+                val hasRomGbc = hasFileOnRoot(fs.rootDirectory, "ROM.GBC")
+                val camera = detectOrPickCamera(hasRomGbc)
+                AppLog.i("[JoeyJr] Camera: ${camera.displayName}")
+
+                syncWithLibaums(storageDevice, fs, config, destDir, deviceName, camera)
                 AppLog.i("[JoeyJr] Sync complete via libaums")
                 return
             } else {
@@ -281,7 +299,15 @@ class UsbDeviceManager(
             val partitionOffset = findPartitionOffset(freshDevice)
             AppLog.d("[JoeyJr] Partition offset: $partitionOffset")
             val fatReader = Fat12Reader(freshDevice, partitionOffset)
-            syncWithFatReader(fatReader, config, destDir, deviceName)
+
+            // Detect camera type via FAT reader
+            val hasRomGbc = fatReader.listRootFiles("ROM.GBC") { name, filter ->
+                name.equals(filter, ignoreCase = true)
+            }.isNotEmpty()
+            val camera = detectOrPickCamera(hasRomGbc)
+            AppLog.i("[JoeyJr] Camera: ${camera.displayName}")
+
+            syncWithFatReader(fatReader, config, destDir, deviceName, camera)
             AppLog.i("[JoeyJr] Sync complete via raw SCSI")
         } catch (e: Exception) {
             AppLog.e("[JoeyJr] FAT reader sync error", e)
@@ -327,6 +353,7 @@ class UsbDeviceManager(
         }
 
         // Pre-populate with files already in import folder (for continued imports)
+        val copyStartTime = System.currentTimeMillis()
         val copiedFiles = mutableSetOf<String>()
         importDir.walkTopDown().filter { it.isFile }.forEach { file ->
             val rel = file.relativeTo(importDir).path
@@ -433,7 +460,7 @@ class UsbDeviceManager(
 
             for ((usbFile, relativePath) in newFiles) {
                 val originalPath = if (relativePath.isNotEmpty()) relativePath else usbFile.name
-                val targetPath = addTimestampIfSav(originalPath)
+                val targetPath = originalPath
                 _syncState.value = _syncState.value.copy(currentFile = targetPath)
 
                 try {
@@ -479,7 +506,8 @@ class UsbDeviceManager(
 
         // Final status
         val remaining = totalFiles - copiedFiles.size
-        finishSync(deviceName, copiedFiles.size, totalFiles, remaining)
+        val durationMs = System.currentTimeMillis() - copyStartTime
+        finishSync(deviceName, copiedFiles.size, totalFiles, remaining, importDir.absolutePath, durationMs)
         if (remaining > 0) {
             AppLog.w("[Bridge] Finished with $remaining file(s) remaining")
         } else {
@@ -494,7 +522,8 @@ class UsbDeviceManager(
         fs: FileSystem,
         config: DeviceConfig,
         destDir: File,
-        deviceName: String
+        deviceName: String,
+        camera: CameraType? = null
     ) {
         try {
             AppLog.i("Syncing $deviceName -> ${destDir.absolutePath}")
@@ -519,18 +548,19 @@ class UsbDeviceManager(
 
             if (newFiles.isEmpty()) {
                 AppLog.i("All files up to date")
-                _syncState.value = SyncState(status = SyncState.Status.DONE, deviceName = deviceName)
+                _syncState.value = SyncState(status = SyncState.Status.DONE, deviceName = deviceName, targetFolder = destDir.absolutePath, safeToDisconnect = true)
                 storageDevice.close()
                 return
             }
 
+            val copyStartTime = System.currentTimeMillis()
             var copied = 0
             var errors = 0
             val chunkSize = fs.chunkSize
 
             for ((usbFile, relativePath) in newFiles) {
                 val originalPath = if (relativePath.isNotEmpty()) relativePath else usbFile.name
-                val targetPath = addTimestampIfSav(originalPath)
+                val targetPath = formatTargetPath(originalPath, camera?.filePrefix)
                 _syncState.value = _syncState.value.copy(currentFile = targetPath)
 
                 try {
@@ -547,7 +577,8 @@ class UsbDeviceManager(
                 }
             }
 
-            finishSync(deviceName, copied, newFiles.size, errors)
+            val durationMs = System.currentTimeMillis() - copyStartTime
+            finishSync(deviceName, copied, newFiles.size, errors, destDir.absolutePath, durationMs)
             storageDevice.close()
         } catch (e: Exception) {
             AppLog.e("Sync error", e)
@@ -562,7 +593,8 @@ class UsbDeviceManager(
         fatReader: Fat12Reader,
         config: DeviceConfig,
         destDir: File,
-        deviceName: String
+        deviceName: String,
+        camera: CameraType? = null
     ) {
         AppLog.i("Syncing $deviceName -> ${destDir.absolutePath} (via ${fatReader.fatType} reader)")
         _syncState.value = SyncState(status = SyncState.Status.SYNCING, deviceName = deviceName, currentFile = "Scanning files...")
@@ -589,15 +621,16 @@ class UsbDeviceManager(
 
         if (newFiles.isEmpty()) {
             AppLog.i("All files up to date")
-            _syncState.value = SyncState(status = SyncState.Status.DONE, deviceName = deviceName)
+            _syncState.value = SyncState(status = SyncState.Status.DONE, deviceName = deviceName, targetFolder = destDir.absolutePath, safeToDisconnect = true)
             return
         }
 
+        val copyStartTime = System.currentTimeMillis()
         var copied = 0
         var errors = 0
 
         for (file in newFiles) {
-            val targetPath = addTimestampIfSav(file.relativePath)
+            val targetPath = formatTargetPath(file.relativePath, camera?.filePrefix)
             _syncState.value = _syncState.value.copy(currentFile = targetPath)
 
             try {
@@ -614,7 +647,8 @@ class UsbDeviceManager(
             }
         }
 
-        finishSync(deviceName, copied, newFiles.size, errors)
+        val durationMs = System.currentTimeMillis() - copyStartTime
+        finishSync(deviceName, copied, newFiles.size, errors, destDir.absolutePath, durationMs)
     }
 
     // --- Shared helpers ---
@@ -655,7 +689,53 @@ class UsbDeviceManager(
         }
     }
 
-    private fun finishSync(deviceName: String, copied: Int, total: Int, errors: Int) {
+    private fun hasFileOnRoot(rootDir: UsbFile, fileName: String): Boolean {
+        return try {
+            rootDir.listFiles().any { it.name.equals(fileName, ignoreCase = true) }
+        } catch (e: Exception) {
+            AppLog.w("Error checking for $fileName on root: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Detects camera type or shows picker dialog.
+     * If ROM.GBC is present → MiniCam PhotoRom (auto-detected).
+     * Otherwise → show picker with owned cameras (excluding auto-detected ones).
+     */
+    /** Look up owned version of a camera (may have custom prefix) or fall back to default */
+    private suspend fun ownedOrDefault(default: CameraType): CameraType {
+        val owned = repository.ownedCameras.first()
+        return owned.find { it.displayName == default.displayName } ?: default
+    }
+
+    private suspend fun detectOrPickCamera(hasRomGbc: Boolean): CameraType {
+        if (hasRomGbc) {
+            AppLog.i("ROM.GBC detected → MiniCam (PhotoRom)")
+            return ownedOrDefault(CameraType.MINI_CAM_PHOTO_ROM)
+        }
+
+        val owned = repository.ownedCameras.first()
+        val pickerCameras = repository.pickerCameras(owned)
+
+        if (pickerCameras.size == 1) {
+            AppLog.i("Only one camera configured: ${pickerCameras[0].displayName}")
+            return pickerCameras[0]
+        }
+
+        if (pickerCameras.isEmpty()) {
+            AppLog.w("No cameras configured, defaulting to GB Camera (Green)")
+            return CameraType.GB_CAMERA_GREEN
+        }
+
+        // Show picker dialog and wait for user choice
+        cameraChoiceDeferred = CompletableDeferred()
+        _syncState.value = _syncState.value.copy(cameraChoice = pickerCameras)
+        val chosen = cameraChoiceDeferred!!.await()
+        return chosen
+    }
+
+    private fun finishSync(deviceName: String, copied: Int, total: Int, errors: Int, targetFolder: String = "", durationMs: Long = 0) {
         val summary = buildString {
             append("Sync complete: $copied copied")
             if (errors > 0) append(", $errors failed")
@@ -668,7 +748,10 @@ class UsbDeviceManager(
             filesCopied = copied,
             totalFiles = total,
             errors = errors,
-            error = if (errors > 0) "$errors file(s) failed to copy" else null
+            error = if (errors > 0) "$errors file(s) failed to copy" else null,
+            targetFolder = targetFolder,
+            durationMs = durationMs,
+            safeToDisconnect = true
         )
     }
 
@@ -818,11 +901,19 @@ class UsbDeviceManager(
         return 0
     }
 
-    private fun addTimestampIfSav(path: String): String {
-        if (!path.lowercase().endsWith(".sav")) return path
+    /**
+     * Builds the target path for a synced file.
+     * Pattern: <infix>/<datetime>-<infix>.<ext>
+     * e.g. "grn/2026-03-05_112233-grn.sav"
+     * If no infix, returns the original path unchanged.
+     */
+    private fun formatTargetPath(originalPath: String, infix: String?): String {
+        if (infix == null) return originalPath
+        val fileName = originalPath.substringAfterLast('/')
+        val ext = fileName.substringAfterLast('.', "")
         val timestamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
-        val dot = path.lastIndexOf('.')
-        return "${path.substring(0, dot)}_$timestamp${path.substring(dot)}"
+        val newName = if (ext.isNotEmpty()) "$timestamp-$infix.$ext" else "$timestamp-$infix"
+        return "$infix/$newName"
     }
 
     /**

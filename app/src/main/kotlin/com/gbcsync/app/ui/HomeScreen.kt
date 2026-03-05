@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Usb
@@ -47,8 +48,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
 import com.gbcsync.app.SyncState
+import com.gbcsync.app.data.CameraType
 import com.gbcsync.app.data.AppLog
 import com.gbcsync.app.data.SyncLogEntry
 import java.text.SimpleDateFormat
@@ -66,8 +70,10 @@ fun HomeScreen(
     onRetrySync: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onOpenGbPrinterWeb: () -> Unit,
+    onOpenFolder: (String) -> Unit = {},
     onContinueImport: () -> Unit = {},
-    onNewImport: () -> Unit = {}
+    onNewImport: () -> Unit = {},
+    onCameraChosen: (CameraType) -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(if (debugLogEnabled) 1 else 0) }
 
@@ -98,6 +104,7 @@ fun HomeScreen(
                 connectedDevice, syncState,
                 onRetry = onRetrySync,
                 onOpenGbPrinterWeb = onOpenGbPrinterWeb,
+                onOpenFolder = onOpenFolder,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
@@ -139,6 +146,35 @@ fun HomeScreen(
                     Text("Start New")
                 }
             }
+        )
+    }
+
+    // Camera picker dialog
+    syncState.cameraChoice?.let { cameras ->
+        AlertDialog(
+            onDismissRequest = { onCameraChosen(cameras.first()) },
+            title = { Text("Select Camera") },
+            text = {
+                Column {
+                    cameras.forEach { camera ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onCameraChosen(camera) }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = false,
+                                onClick = { onCameraChosen(camera) }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(camera.displayName)
+                        }
+                    }
+                }
+            },
+            confirmButton = {}
         )
     }
 }
@@ -199,7 +235,7 @@ private fun LiveLogTab(logLines: List<String>) {
 }
 
 @Composable
-private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState, onRetry: () -> Unit, onOpenGbPrinterWeb: () -> Unit, modifier: Modifier = Modifier) {
+private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState, onRetry: () -> Unit, onOpenGbPrinterWeb: () -> Unit, onOpenFolder: (String) -> Unit = {}, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -277,6 +313,24 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                 }
             }
 
+            if (syncState.status == SyncState.Status.DONE && syncState.safeToDisconnect) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.UsbOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Safe to disconnect USB cable",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                    )
+                }
+            }
+
             if (syncState.status == SyncState.Status.ERROR ||
                 (syncState.status == SyncState.Status.DONE && syncState.errors > 0)) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -286,16 +340,45 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
             }
 
             if (syncState.status == SyncState.Status.DONE && syncState.filesCopied > 0) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = onOpenGbPrinterWeb,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.tertiary
+                if (syncState.targetFolder.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    val folderName = syncState.targetFolder.substringAfterLast('/')
+                    val statsText = buildString {
+                        append("${syncState.filesCopied} file${if (syncState.filesCopied != 1) "s" else ""}")
+                        if (syncState.durationMs > 0) append(" in ${formatDuration(syncState.durationMs)}")
+                        append(" \u2022 $folderName")
+                    }
+                    Text(
+                        text = statsText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
                     )
-                ) {
-                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Open GB Printer Web")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (syncState.targetFolder.isNotEmpty()) {
+                        Button(
+                            onClick = { onOpenFolder(syncState.targetFolder) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary
+                            )
+                        ) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Open Folder")
+                        }
+                    }
+                    Button(
+                        onClick = onOpenGbPrinterWeb,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary
+                        )
+                    ) {
+                        Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Open GB Printer Web")
+                    }
                 }
             }
         }
@@ -328,6 +411,16 @@ private fun SyncLogItem(entry: SyncLogEntry) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+private fun formatDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return when {
+        minutes > 0 -> "${minutes}m ${seconds}s"
+        else -> "${seconds}s"
     }
 }
 

@@ -4,10 +4,11 @@ Android app that auto-syncs files from Game Boy Camera cart readers (JoeyJr, Pic
 
 ## How it works
 
-1. Plug in USB drive via OTG adapter → app auto-launches
-2. Matches device against configured list → requests USB permission if needed
-3. Auto-copies matching files to configured destination folder
-4. Shows progress → done, unplug
+1. Plug in cart reader via OTG adapter → app auto-launches
+2. Detects device and requests USB permission if needed
+3. Identifies the camera type (auto-detected or manual picker)
+4. Copies files to organized folders with timestamped names
+5. Shows "Safe to disconnect" when done
 
 Save files (`.sav`) are saved with a timestamp and camera infix (e.g. `grn/2026-03-04_143000-grn.sav`). Other files use duplicate detection (skip if same name + size).
 
@@ -71,7 +72,7 @@ Plug the device into your Mac and run:
 ioreg -p IOUSB -l | grep -E '"USB Product Name"|"idVendor"|"idProduct"'
 ```
 
-### On the Pixel 5
+### On Android
 
 Plug the device into the phone via OTG and run:
 
@@ -116,11 +117,12 @@ Configure which cameras you own in **Settings → My Gear**. Custom cameras (e.g
 
 ## Usage
 
-1. Open the app and verify your device configs in **Settings** (gear icon)
-2. Plug in your USB device via OTG adapter
+1. Configure your cameras in **Settings → My Gear** and verify device configs (gear icon)
+2. Plug in your cart reader via OTG adapter
 3. Grant USB permission when prompted (one-time per device)
-4. Files auto-sync with progress shown on the home screen
-5. Unplug when done
+4. For JoeyJr: select which camera you're reading from (if multiple configured)
+5. Files auto-sync with progress shown on the home screen
+6. Wait for "Safe to disconnect" indicator, then unplug
 
 ### Debugging
 
@@ -130,6 +132,8 @@ If sync fails, a **Retry Sync** button appears on the status card. The app retri
 
 ## Technical notes
 
-- **Superfloppy support**: JoeyJr has no partition table (FAT32 starts at block 0). The app handles this by falling back to direct filesystem access when no MBR/GPT is found.
-- **libaums**: Bypasses Android's kernel USB mass storage driver entirely. Issues SCSI commands directly via USB Host API, then reads FAT32 structures in userspace.
+- **FAT12/16/32 support**: Custom read-only FAT reader handles all three variants, including superfloppy layouts (no partition table, FAT starts at block 0).
+- **libaums + raw SCSI fallback**: Primary file access uses [libaums](https://github.com/magnusja/libaums) which issues SCSI commands via USB Host API. If libaums fails (e.g. no partition table), the app falls back to raw SCSI block device access with a custom FAT reader.
+- **PicNRec reconnection**: The RP2040/TinyUSB connection degrades after sustained SCSI traffic. The app copies files one at a time with delays, and automatically reconnects when errors occur — up to 20 rounds.
+- **Camera auto-detection**: MiniCam PhotoRom is identified by the presence of `ROM.GBC` on the cartridge filesystem. PicNRec is identified by USB vendor/product ID.
 - **File filters**: Simple glob patterns — `*.sav`, `*.png`, `*.gb*`, `*` (all files).

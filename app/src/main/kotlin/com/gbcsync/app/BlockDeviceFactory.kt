@@ -63,7 +63,7 @@ class BlockDeviceFactory(private val usbManager: UsbManager) {
 
                 delay(1000L * attempt)
 
-                val device = RawScsiBlockDevice(connection, outEndpoint, inEndpoint, massStorageInterface.id)
+                val device = RawScsiBlockDevice(connection, outEndpoint, inEndpoint, massStorageInterface)
                 device.init()
 
                 if (device.initialized) {

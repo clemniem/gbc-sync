@@ -2,8 +2,10 @@ package com.gbcsync.app
 
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
+import android.hardware.usb.UsbInterface
 import com.gbcsync.app.data.AppLog
 import me.jahnen.libaums.core.driver.BlockDeviceDriver
+import java.io.Closeable
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -20,8 +22,8 @@ class RawScsiBlockDevice(
     private val connection: UsbDeviceConnection,
     private val outEndpoint: UsbEndpoint,
     private val inEndpoint: UsbEndpoint,
-    private val interfaceId: Int = 0
-) : BlockDeviceDriver {
+    private val usbInterface: UsbInterface
+) : BlockDeviceDriver, Closeable {
 
     private var _blockSize = 512
     private var _lastBlockAddress = Int.MAX_VALUE
@@ -33,6 +35,19 @@ class RawScsiBlockDevice(
 
     override val blockSize: Int get() = _blockSize
     override val blocks: Long get() = _lastBlockAddress.toLong()
+
+    override fun close() {
+        try {
+            connection.releaseInterface(usbInterface)
+        } catch (e: Exception) {
+            AppLog.w("Failed to release USB interface: ${e.message}")
+        }
+        try {
+            connection.close()
+        } catch (e: Exception) {
+            AppLog.w("Failed to close USB connection: ${e.message}")
+        }
+    }
 
     override fun init() {
         // Reset the Bulk-Only Transport state and wait for device to stabilize
@@ -193,7 +208,7 @@ class RawScsiBlockDevice(
         // USB Bulk-Only Mass Storage Reset
         try {
             val result = connection.controlTransfer(
-                0x21, 0xFF, 0, interfaceId, null, 0, 2000
+                0x21, 0xFF, 0, usbInterface.id, null, 0, 2000
             )
             AppLog.d("Bulk-Only Reset result=$result")
         } catch (e: Exception) {

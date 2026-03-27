@@ -16,7 +16,11 @@
       "Bash(jar tf:*)",
       "Bash(jar xf:*)",
       "Bash(adb devices:*)",
-      "Bash(/usr/bin/grep:*)"
+      "Bash(/usr/bin/grep:*)",
+      "Bash(~/Library/Android/sdk/platform-tools/adb devices:*)",
+      "Bash(git add:*)",
+      "Bash(./gradlew installDebug:*)",
+      "Bash(grep:*)"
     ]
   }
 }

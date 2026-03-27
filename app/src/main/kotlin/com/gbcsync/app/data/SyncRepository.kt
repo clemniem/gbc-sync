@@ -13,6 +13,7 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "gbc_sync")
 
@@ -208,14 +209,17 @@ class SyncRepository(private val context: Context) {
         return destFile.length() != fileSize
     }
 
+    private val filterRegexCache = ConcurrentHashMap<String, Regex>()
+
     fun matchesFilter(fileName: String, filter: String): Boolean {
         if (filter == "*") return true
-        // Support simple glob patterns like *.sav, *.gb*
-        val regex = filter
-            .replace(".", "\\.")
-            .replace("*", ".*")
-            .replace("?", ".")
-            .let { Regex(it, RegexOption.IGNORE_CASE) }
+        val regex = filterRegexCache.getOrPut(filter) {
+            filter
+                .replace(".", "\\.")
+                .replace("*", ".*")
+                .replace("?", ".")
+                .let { Regex(it, RegexOption.IGNORE_CASE) }
+        }
         return regex.matches(fileName)
     }
 }

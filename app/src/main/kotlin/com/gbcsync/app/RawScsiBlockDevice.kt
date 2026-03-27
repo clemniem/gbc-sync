@@ -7,6 +7,7 @@ import me.jahnen.libaums.core.driver.BlockDeviceDriver
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Minimal SCSI READ(10) implementation that talks directly to USB bulk endpoints.
@@ -24,7 +25,7 @@ class RawScsiBlockDevice(
 
     private var _blockSize = 512
     private var _lastBlockAddress = Int.MAX_VALUE
-    private var tag = 1
+    private val tag = AtomicInteger(1)
 
     /** True if the device responded to at least one SCSI command during init */
     var initialized = false
@@ -41,7 +42,7 @@ class RawScsiBlockDevice(
 
         // Try READ CAPACITY (non-fatal if it fails)
         try {
-            val cbw = buildCbw(tag++, 8, 0x80, buildReadCapacity())
+            val cbw = buildCbw(tag.getAndIncrement(), 8, 0x80, buildReadCapacity())
             sendCbw(cbw)
             val buf = ByteArray(maxOf(64, inEndpoint.maxPacketSize))
             val dataResult = connection.bulkTransfer(inEndpoint, buf, buf.size, 5000)
@@ -83,7 +84,7 @@ class RawScsiBlockDevice(
         // Fallback: verify device responds with READ(10) of block 0
         try {
             AppLog.d("Trying READ(10) block 0 as fallback...")
-            val cbw = buildCbw(tag++, 512, 0x80, buildRead10(0, 1))
+            val cbw = buildCbw(tag.getAndIncrement(), 512, 0x80, buildRead10(0, 1))
             sendCbw(cbw)
             val buf = ByteArray(512)
             val dataResult = connection.bulkTransfer(inEndpoint, buf, buf.size, 5000)
@@ -107,7 +108,7 @@ class RawScsiBlockDevice(
         if (blockCount == 0) return
 
         val lba = deviceOffset
-        val cbw = buildCbw(tag++, blockCount * _blockSize, 0x80,
+        val cbw = buildCbw(tag.getAndIncrement(), blockCount * _blockSize, 0x80,
             buildRead10(lba.toInt(), blockCount))
         sendCbw(cbw)
         val data = receiveData(blockCount * _blockSize)

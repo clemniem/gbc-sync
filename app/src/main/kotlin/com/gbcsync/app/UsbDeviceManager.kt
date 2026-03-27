@@ -864,7 +864,7 @@ class UsbDeviceManager(
      * Bypasses libaums entirely — no INQUIRY, no SCSI init that could corrupt state.
      * Retries with progressive backoff if the device doesn't respond.
      */
-    private fun getRawBlockDeviceFresh(usbDevice: UsbDevice): RawScsiBlockDevice? {
+    private suspend fun getRawBlockDeviceFresh(usbDevice: UsbDevice): RawScsiBlockDevice? {
         // Find mass storage interface and endpoints
         var massStorageInterface: UsbInterface? = null
         for (i in 0 until usbDevice.interfaceCount) {
@@ -909,7 +909,7 @@ class UsbDeviceManager(
                 }
 
                 // Progressive delay before init — give device more time on each attempt
-                Thread.sleep(1000L * attempt)
+                delay(1000L * attempt)
 
                 val device = RawScsiBlockDevice(connection, outEndpoint, inEndpoint, massStorageInterface.id)
                 device.init()

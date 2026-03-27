@@ -120,7 +120,6 @@ class JoeyJrSync(
             if (newFiles.isEmpty()) {
                 AppLog.i("All files up to date")
                 syncState.value = SyncState(status = SyncState.Status.DONE, deviceName = deviceName, targetFolder = destDir.absolutePath, safeToDisconnect = true)
-                storageDevice.close()
                 return
             }
 
@@ -149,10 +148,10 @@ class JoeyJrSync(
 
             val durationMs = System.currentTimeMillis() - copyStartTime
             finishSync(syncState, repository, deviceName, copied, newFiles.size, errors, destDir.absolutePath, durationMs)
-            storageDevice.close()
         } catch (e: Exception) {
             AppLog.e("Sync error", e)
             syncState.value = SyncState(status = SyncState.Status.ERROR, error = e.message ?: "Unknown error")
+        } finally {
             storageDevice.closeSafely()
         }
     }

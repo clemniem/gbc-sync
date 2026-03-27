@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.tooling.preview.Preview
 import com.gbcsync.app.data.CameraType
 import com.gbcsync.app.data.DeviceConfig
 
@@ -434,5 +435,26 @@ private fun CameraCheckboxRow(
                 singleLine = true
             )
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun SettingsScreenPreview() {
+    MaterialTheme {
+        SettingsScreen(
+            devices = listOf(
+                DeviceConfig(name = "Joey Jr", vendorId = 49745, productId = 8224, fileFilter = "*.bmp"),
+                DeviceConfig(name = "2bitBridge", vendorId = 9114, productId = 51966, fileFilter = "*")
+            ),
+            onDevicesChanged = {},
+            ownedCameras = setOf(CameraType.GB_CAMERA_GREEN),
+            onOwnedCamerasChanged = {},
+            baseFolder = "gbc-sync",
+            onBaseFolderChanged = {},
+            debugLogEnabled = true,
+            onDebugLogEnabledChanged = {},
+            onNavigateBack = {}
+        )
     }
 }

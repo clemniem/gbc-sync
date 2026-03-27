@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.RadioButton
+import androidx.compose.ui.tooling.preview.Preview
 import com.gbcsync.app.SyncState
 import com.gbcsync.app.data.CameraType
 import com.gbcsync.app.data.AppLog
@@ -427,5 +428,84 @@ private fun formatDuration(ms: Long): String {
     return when {
         minutes > 0 -> "${minutes}m ${seconds}s"
         else -> "${seconds}s"
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun HomeScreenPreview() {
+    MaterialTheme {
+        HomeScreen(
+            syncState = SyncState(
+                status = SyncState.Status.SYNCING,
+                deviceName = "Joey Jr",
+                currentFile = "GBC_001.bmp",
+                filesCopied = 3,
+                totalFiles = 12
+            ),
+            connectedDevice = "Joey Jr",
+            syncLog = listOf(
+                SyncLogEntry("Joey Jr", System.currentTimeMillis() - 3600_000, 24, 0, 0, 45_000, "/storage/gbc-sync"),
+                SyncLogEntry("2bitBridge", System.currentTimeMillis() - 86400_000, 8, 1, 0, 12_000, "/storage/gbc-sync")
+            ),
+            logLines = listOf("[I] Syncing Joey Jr", "[D] Copying GBC_001.bmp"),
+            debugLogEnabled = false,
+            onRetrySync = {},
+            onNavigateToSettings = {},
+            onOpenGbPrinterWeb = {}
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun ConnectionStatusCardIdlePreview() {
+    MaterialTheme {
+        ConnectionStatusCard(
+            connectedDevice = null,
+            syncState = SyncState(),
+            onRetry = {},
+            onOpenGbPrinterWeb = {},
+            modifier = Modifier.padding(16.dp)
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun ConnectionStatusCardDonePreview() {
+    MaterialTheme {
+        ConnectionStatusCard(
+            connectedDevice = "Joey Jr",
+            syncState = SyncState(
+                status = SyncState.Status.DONE,
+                deviceName = "Joey Jr",
+                filesCopied = 24,
+                totalFiles = 24,
+                targetFolder = "/storage/gbc-sync/joey-jr",
+                durationMs = 45_000,
+                safeToDisconnect = true
+            ),
+            onRetry = {},
+            onOpenGbPrinterWeb = {},
+            modifier = Modifier.padding(16.dp)
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun ConnectionStatusCardErrorPreview() {
+    MaterialTheme {
+        ConnectionStatusCard(
+            connectedDevice = "Joey Jr",
+            syncState = SyncState(
+                status = SyncState.Status.ERROR,
+                error = "USB connection lost"
+            ),
+            onRetry = {},
+            onOpenGbPrinterWeb = {},
+            modifier = Modifier.padding(16.dp)
+        )
     }
 }

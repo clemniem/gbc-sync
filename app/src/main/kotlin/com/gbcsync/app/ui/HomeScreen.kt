@@ -135,7 +135,7 @@ fun HomeScreen(
             text = { Text(choice.message) },
             confirmButton = {
                 Button(onClick = onContinueImport) {
-                    Text("Continue")
+                    Text(choice.appendLabel)
                 }
             },
             dismissButton = {
@@ -143,7 +143,7 @@ fun HomeScreen(
                     onClick = onNewImport,
                     colors = ButtonDefaults.textButtonColors()
                 ) {
-                    Text("Start New")
+                    Text(choice.newLabel)
                 }
             }
         )

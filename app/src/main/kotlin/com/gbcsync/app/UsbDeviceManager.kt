@@ -36,7 +36,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-data class ImportChoice(val message: String)
+data class ImportChoice(
+    val message: String,
+    val appendLabel: String = "Append",
+    val newLabel: String = "Start New",
+    val autoAppendSeconds: Int = 0
+)
 
 data class SyncState(
     val status: Status = Status.IDLE,
@@ -71,7 +76,7 @@ class UsbDeviceManager(
         private const val BRIDGE_BOOT_DELAY_MS = 4000L
         private const val BRIDGE_RECONNECT_DELAY_MS = 2000L
         private const val BRIDGE_FILE_DELAY_MS = 250L
-        private const val BRIDGE_RECENT_IMPORT_WINDOW_MS = 60 * 60 * 1000L
+        private val SYNC_FOLDER_REGEX = Regex("sync-\\d{3}")
     }
 
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
@@ -330,33 +335,79 @@ class UsbDeviceManager(
         destDir: File,
         deviceName: String
     ) {
-        // Check for recent import folder
-        val importDir: File
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US)
-        val recentFolder = findRecentImportFolder(destDir, dateFormat)
+        // Step 0: Quick scan to list device files for prefix matching
+        _syncState.value = SyncState(
+            status = SyncState.Status.CONNECTING,
+            deviceName = deviceName,
+            currentFile = "Scanning device files..."
+        )
 
-        if (recentFolder != null) {
-            val fileCount = recentFolder.listFiles()?.size ?: 0
-            AppLog.i("[Bridge] Found recent import: ${recentFolder.name} ($fileCount files)")
-            importChoiceDeferred = CompletableDeferred()
-            _syncState.value = _syncState.value.copy(
-                importChoice = ImportChoice("Continue import \"${recentFolder.name}\" ($fileCount files already)?")
-            )
-            val continueExisting = importChoiceDeferred!!.await()
-            if (continueExisting) {
-                importDir = recentFolder
-                AppLog.i("[Bridge] Continuing import: ${importDir.name}")
-            } else {
-                importDir = createImportFolder(destDir, dateFormat)
+        val deviceFileIndex = mutableListOf<Triple<String, Long, UsbFile>>() // relativePath, size, usbFile
+        try {
+            storageDevice.init()
+            val partition = storageDevice.partitions.firstOrNull()
+            if (partition != null) {
+                val fs = partition.fileSystem
+                val allFiles = mutableListOf<Pair<UsbFile, String>>()
+                collectLibaumsFiles(fs.rootDirectory, "", config.fileFilter, config.recursive, allFiles)
+                for ((usbFile, relativePath) in allFiles) {
+                    val path = if (relativePath.isNotEmpty()) relativePath else usbFile.name
+                    deviceFileIndex.add(Triple(path, usbFile.length, usbFile))
+                }
+                deviceFileIndex.sortBy { it.first }
+                AppLog.i("[Bridge] Device has ${deviceFileIndex.size} files")
             }
-        } else {
-            importDir = createImportFolder(destDir, dateFormat)
+            storageDevice.closeSafely()
+        } catch (e: Exception) {
+            AppLog.w("[Bridge] Quick scan failed: ${e.message}, proceeding with fresh folder")
+            storageDevice.closeSafely()
         }
 
-        // Pre-populate with files already in import folder (for continued imports)
+        // Step 1: Find existing sync folder whose files are a prefix of the device files
+        val matchingFolder = findMatchingImportFolder(destDir, deviceFileIndex)
+        val importDir: File
+
+        if (matchingFolder != null) {
+            val existingFiles = matchingFolder.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.toList()
+            val existingPaths = existingFiles.map { it.relativeTo(matchingFolder).path }.toSet()
+            val newOnDevice = deviceFileIndex.count { (path, _, _) -> path !in existingPaths }
+
+            if (newOnDevice == 0) {
+                AppLog.i("[Bridge] All ${deviceFileIndex.size} files already in ${matchingFolder.name}, nothing to copy")
+                _syncState.value = SyncState(
+                    status = SyncState.Status.DONE,
+                    deviceName = deviceName,
+                    targetFolder = matchingFolder.absolutePath,
+                    safeToDisconnect = true
+                )
+                return
+            }
+
+            AppLog.i("[Bridge] Found matching folder: ${matchingFolder.name} (${existingFiles.size} existing, $newOnDevice new)")
+            importChoiceDeferred = CompletableDeferred()
+            _syncState.value = _syncState.value.copy(
+                importChoice = ImportChoice(
+                    message = "${existingFiles.size} files already in \"${matchingFolder.name}\", $newOnDevice new to copy",
+                    appendLabel = "Append",
+                    newLabel = "Start New",
+                    autoAppendSeconds = 10
+                )
+            )
+            val append = importChoiceDeferred!!.await()
+            if (append) {
+                importDir = matchingFolder
+                AppLog.i("[Bridge] Appending to: ${importDir.name}")
+            } else {
+                importDir = createImportFolder(destDir)
+            }
+        } else {
+            importDir = createImportFolder(destDir)
+        }
+
+        // Pre-populate with files already in import folder
         val copyStartTime = System.currentTimeMillis()
         val copiedFiles = mutableSetOf<String>()
-        importDir.walkTopDown().filter { it.isFile }.forEach { file ->
+        importDir.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.forEach { file ->
             val rel = file.relativeTo(importDir).path
             copiedFiles.add(rel)
         }
@@ -654,22 +705,48 @@ class UsbDeviceManager(
 
     // --- Shared helpers ---
 
-    private fun findRecentImportFolder(destDir: File, dateFormat: SimpleDateFormat): File? {
-        val now = System.currentTimeMillis()
-        return destDir.listFiles()
-            ?.filter { it.isDirectory }
-            ?.mapNotNull { dir ->
-                try {
-                    val folderTime = dateFormat.parse(dir.name)?.time ?: return@mapNotNull null
-                    if (now - folderTime < BRIDGE_RECENT_IMPORT_WINDOW_MS) dir to folderTime else null
-                } catch (_: Exception) { null }
+    /**
+     * Find an existing sync-NNN folder whose files are a prefix of the device's file list.
+     * Returns the matching folder, or null if no match (triggering creation of a new folder).
+     */
+    private fun findMatchingImportFolder(
+        destDir: File,
+        deviceFileIndex: List<Triple<String, Long, UsbFile>>
+    ): File? {
+        if (deviceFileIndex.isEmpty()) return null
+
+        val devicePaths = deviceFileIndex.map { it.first }.sorted()
+
+        val syncFolders = destDir.listFiles()
+            ?.filter { it.isDirectory && it.name.matches(SYNC_FOLDER_REGEX) }
+            ?.sortedByDescending { it.name }
+            ?: return null
+
+        for (folder in syncFolders) {
+            val folderPaths = folder.walkTopDown()
+                .filter { it.isFile && !it.name.endsWith(".tmp") }
+                .map { it.relativeTo(folder).path }
+                .sorted()
+                .toList()
+
+            if (folderPaths.isEmpty()) continue
+            if (folderPaths.size > devicePaths.size) continue
+
+            val isPrefix = folderPaths.indices.all { i ->
+                folderPaths[i] == devicePaths[i]
             }
-            ?.maxByOrNull { it.second }
-            ?.first
+
+            if (isPrefix) return folder
+        }
+        return null
     }
 
-    private fun createImportFolder(destDir: File, dateFormat: SimpleDateFormat): File {
-        val dir = File(destDir, dateFormat.format(Date()))
+    private fun createImportFolder(destDir: File): File {
+        val nextNumber = (destDir.listFiles()
+            ?.filter { it.isDirectory && it.name.matches(SYNC_FOLDER_REGEX) }
+            ?.mapNotNull { it.name.removePrefix("sync-").toIntOrNull() }
+            ?.maxOrNull() ?: 0) + 1
+        val dir = File(destDir, "sync-%03d".format(nextNumber))
         dir.mkdirs()
         AppLog.i("[Bridge] New import folder: ${dir.name}")
         return dir

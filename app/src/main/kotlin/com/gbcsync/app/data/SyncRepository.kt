@@ -106,7 +106,7 @@ class SyncRepository(private val context: Context) {
             recursive = false
         ),
         DeviceConfig(
-            name = "2bitBridge",
+            name = "PicNRec",
             vendorId = 9114,
             productId = 51966,
             fileFilter = "*.png",

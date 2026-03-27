@@ -3,15 +3,15 @@ package com.gbcsync.app.data
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.flow.update
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 object AppLog {
     private const val TAG = "GBCSync"
     private const val MAX_LINES = 500
 
-    private val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
 
     private val _lines = MutableStateFlow<List<String>>(emptyList())
     val lines: StateFlow<List<String>> = _lines
@@ -42,12 +42,12 @@ object AppLog {
     }
 
     fun clear() {
-        _lines.value = emptyList()
+        _lines.update { emptyList() }
     }
 
     private fun append(level: String, message: String) {
-        val timestamp = dateFormat.format(Date())
+        val timestamp = LocalTime.now().format(timeFormatter)
         val line = "$timestamp $level $message"
-        _lines.value = (_lines.value + line).takeLast(MAX_LINES)
+        _lines.update { current -> (current + line).takeLast(MAX_LINES) }
     }
 }

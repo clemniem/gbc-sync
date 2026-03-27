@@ -61,10 +61,13 @@ data class DeviceConfig(
 )
 
 data class SyncLogEntry(
-    val fileName: String,
     val deviceName: String,
     val timestamp: Long,
-    val fileSize: Long
+    val filesCopied: Int,
+    val errors: Int,
+    val totalBytes: Long,
+    val durationMs: Long,
+    val targetFolder: String
 )
 
 class SyncRepository(private val context: Context) {
@@ -181,8 +184,7 @@ class SyncRepository(private val context: Context) {
             } catch (_: Exception) {
                 emptyList()
             }
-            // Keep last 500 entries
-            val updated = (listOf(entry) + existing).take(500)
+            val updated = (listOf(entry) + existing).take(100)
             prefs[SYNC_LOG_KEY] = gson.toJson(updated)
         }
     }

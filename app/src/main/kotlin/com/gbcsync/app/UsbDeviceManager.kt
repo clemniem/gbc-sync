@@ -531,7 +531,6 @@ class UsbDeviceManager(
                     copiedFiles.add(originalPath)
                     copiedThisRound++
                     AppLog.d("[Bridge] Copied $targetPath OK (#$copiedThisRound this round, delay=${BRIDGE_FILE_DELAY_MS}ms)")
-                    logSyncEntry(targetPath, deviceName, usbFile.length)
                     _syncState.value = _syncState.value.copy(filesCopied = copiedFiles.size)
 
                     // Give RP2040 time to recover between files
@@ -620,7 +619,6 @@ class UsbDeviceManager(
                     copyLibaumsFile(usbFile, destDir, targetPath, chunkSize, fs)
                     copied++
                     AppLog.d("Copied $targetPath OK")
-                    logSyncEntry(targetPath, deviceName, usbFile.length)
                     _syncState.value = _syncState.value.copy(filesCopied = copied)
                 } catch (e: Exception) {
                     errors++
@@ -690,7 +688,6 @@ class UsbDeviceManager(
                 copyFat32LibFile(file, destDir, targetPath)
                 copied++
                 AppLog.d("Copied $targetPath OK")
-                logSyncEntry(targetPath, deviceName, file.length)
                 _syncState.value = _syncState.value.copy(filesCopied = copied)
             } catch (e: Exception) {
                 errors++
@@ -752,21 +749,6 @@ class UsbDeviceManager(
         return dir
     }
 
-    private suspend fun logSyncEntry(targetPath: String, deviceName: String, fileSize: Long) {
-        try {
-            repository.addSyncLogEntry(
-                SyncLogEntry(
-                    fileName = targetPath,
-                    deviceName = deviceName,
-                    timestamp = System.currentTimeMillis(),
-                    fileSize = fileSize
-                )
-            )
-        } catch (e: Exception) {
-            AppLog.w("Failed to write sync log entry: ${e.message}")
-        }
-    }
-
     private fun hasFileOnRoot(rootDir: UsbFile, fileName: String): Boolean {
         return try {
             rootDir.listFiles().any { it.name.equals(fileName, ignoreCase = true) }
@@ -813,7 +795,7 @@ class UsbDeviceManager(
         return chosen
     }
 
-    private fun finishSync(deviceName: String, copied: Int, total: Int, errors: Int, targetFolder: String = "", durationMs: Long = 0) {
+    private suspend fun finishSync(deviceName: String, copied: Int, total: Int, errors: Int, targetFolder: String = "", durationMs: Long = 0) {
         val summary = buildString {
             append("Sync complete: $copied copied")
             if (errors > 0) append(", $errors failed")
@@ -831,6 +813,22 @@ class UsbDeviceManager(
             durationMs = durationMs,
             safeToDisconnect = true
         )
+
+        try {
+            repository.addSyncLogEntry(
+                SyncLogEntry(
+                    deviceName = deviceName,
+                    timestamp = System.currentTimeMillis(),
+                    filesCopied = copied,
+                    errors = errors,
+                    totalBytes = 0,
+                    durationMs = durationMs,
+                    targetFolder = targetFolder
+                )
+            )
+        } catch (e: Exception) {
+            AppLog.w("Failed to write sync log entry: ${e.message}")
+        }
     }
 
     private fun collectLibaumsFiles(

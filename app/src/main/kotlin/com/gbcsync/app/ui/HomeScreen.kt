@@ -392,16 +392,22 @@ private fun SyncLogItem(entry: SyncLogEntry) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = entry.fileName,
+                text = buildString {
+                    append("${entry.filesCopied} file${if (entry.filesCopied != 1) "s" else ""} synced")
+                    if (entry.errors > 0) append(", ${entry.errors} failed")
+                },
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(
-                text = "${entry.deviceName} - ${formatFileSize(entry.fileSize)}",
+                text = buildString {
+                    append(entry.deviceName)
+                    if (entry.durationMs > 0) append(" \u2022 ${formatDuration(entry.durationMs)}")
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -421,13 +427,5 @@ private fun formatDuration(ms: Long): String {
     return when {
         minutes > 0 -> "${minutes}m ${seconds}s"
         else -> "${seconds}s"
-    }
-}
-
-private fun formatFileSize(bytes: Long): String {
-    return when {
-        bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-        else -> "${"%.1f".format(bytes / (1024.0 * 1024.0))} MB"
     }
 }

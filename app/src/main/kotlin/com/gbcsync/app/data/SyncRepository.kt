@@ -76,6 +76,8 @@ class SyncRepository(private val context: Context) {
         val SYNC_LOG_KEY = stringPreferencesKey("sync_log")
         val DEBUG_LOG_KEY = booleanPreferencesKey("debug_log_enabled")
         val OWNED_CAMERAS_KEY = stringPreferencesKey("owned_cameras")
+        val BASE_FOLDER_KEY = stringPreferencesKey("base_folder")
+        const val DEFAULT_BASE_FOLDER = "gbc-sync"
     }
 
     // --- Device Configs ---
@@ -136,6 +138,18 @@ class SyncRepository(private val context: Context) {
             if (builtInIndex >= 0) builtInIndex else Int.MAX_VALUE
         }
 
+    // --- Base Folder ---
+
+    val baseFolder: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[BASE_FOLDER_KEY] ?: DEFAULT_BASE_FOLDER
+    }
+
+    suspend fun setBaseFolder(folder: String) {
+        context.dataStore.edit { prefs ->
+            prefs[BASE_FOLDER_KEY] = folder
+        }
+    }
+
     // --- Debug Logging ---
 
     val debugLogEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
@@ -175,12 +189,12 @@ class SyncRepository(private val context: Context) {
 
     // --- File Operations ---
 
-    fun getDestDir(deviceConfig: DeviceConfig): File {
-        val base = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+    fun getDestDir(deviceConfig: DeviceConfig, baseFolder: String = DEFAULT_BASE_FOLDER): File {
+        val base = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val folder = if (deviceConfig.destFolder.isNotBlank()) {
             deviceConfig.destFolder
         } else {
-            "GBCSync/${deviceConfig.name}"
+            "$baseFolder/${deviceConfig.name}"
         }
         return File(base, folder).also { it.mkdirs() }
     }

@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
                     val logLines by AppLog.lines.collectAsState()
                     val debugLogEnabled by repository.debugLogEnabled.collectAsState(initial = true)
                     val ownedCameras by repository.ownedCameras.collectAsState(initial = emptySet())
+                    val baseFolder by repository.baseFolder.collectAsState(initial = "gbc-sync")
 
                     NavHost(navController = navController, startDestination = "home") {
                         composable("home") {
@@ -108,6 +109,12 @@ class MainActivity : ComponentActivity() {
                                 onOwnedCamerasChanged = { updated ->
                                     lifecycleScope.launch {
                                         repository.saveOwnedCameras(updated)
+                                    }
+                                },
+                                baseFolder = baseFolder,
+                                onBaseFolderChanged = { updated ->
+                                    lifecycleScope.launch {
+                                        repository.setBaseFolder(updated)
                                     }
                                 },
                                 debugLogEnabled = debugLogEnabled,

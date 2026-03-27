@@ -222,10 +222,11 @@ class UsbDeviceManager(
         if (massStorageDevices.isEmpty()) return
 
         val configs = repository.deviceConfigs.first()
+        val baseFolder = repository.baseFolder.first()
 
         for (storageDevice in massStorageDevices) {
             val config = findMatchingConfig(storageDevice.usbDevice, configs) ?: configs.firstOrNull() ?: continue
-            val destDir = repository.getDestDir(config)
+            val destDir = repository.getDestDir(config, baseFolder)
             val deviceName = config.name
             val usbDev = storageDevice.usbDevice
 

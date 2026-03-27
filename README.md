@@ -96,7 +96,7 @@ These are preconfigured as defaults in the app.
 | JoeyJr | `*.sav` | No | Copies save files into `<infix>/` subfolder with timestamped names |
 | PicNRec | `*.png` | Yes | Copies photos into timestamped import folder, preserving original folder structure |
 
-Files are saved to `Documents/GBCSync/<device-name>/` on the phone.
+Files are saved to `Downloads/gbc-sync/<device-name>/` on the phone. The base folder is configurable in Settings.
 
 ## Supported cameras
 

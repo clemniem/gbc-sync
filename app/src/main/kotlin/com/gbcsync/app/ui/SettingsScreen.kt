@@ -51,6 +51,8 @@ fun SettingsScreen(
     onDevicesChanged: (List<DeviceConfig>) -> Unit,
     ownedCameras: Set<CameraType>,
     onOwnedCamerasChanged: (Set<CameraType>) -> Unit,
+    baseFolder: String,
+    onBaseFolderChanged: (String) -> Unit,
     debugLogEnabled: Boolean,
     onDebugLogEnabledChanged: (Boolean) -> Unit,
     onNavigateBack: () -> Unit
@@ -109,6 +111,16 @@ fun SettingsScreen(
                         onCheckedChange = onDebugLogEnabledChanged
                     )
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = baseFolder,
+                    onValueChange = onBaseFolderChanged,
+                    label = { Text("Save Folder") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    supportingText = { Text("Under Downloads/") }
+                )
+
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 Text("My Gear", style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -370,7 +382,7 @@ private fun DeviceConfigCard(
                 label = { Text("Destination Folder") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                placeholder = { Text("Default: Documents/GBCSync/${device.name}") }
+                placeholder = { Text("Default: Downloads/gbc-sync/${device.name}") }
             )
 
             Spacer(modifier = Modifier.height(4.dp))

@@ -925,8 +925,9 @@ class UsbDeviceManager(
     private fun copyLibaumsFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int, fs: FileSystem, skipClose: Boolean = false) {
         val destFile = File(destDir, relativePath)
         destFile.parentFile?.mkdirs()
+        val tmpFile = File(destFile.parentFile, destFile.name + ".tmp")
 
-        FileOutputStream(destFile).use { fos ->
+        FileOutputStream(tmpFile).use { fos ->
             fos.channel.truncate(0)
             val buffer = ByteArray(chunkSize)
             val inputStream = UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
@@ -940,16 +941,21 @@ class UsbDeviceManager(
             }
         }
 
-        if (destFile.length() != usbFile.length) {
-            AppLog.w("Size mismatch for $relativePath: expected ${usbFile.length}, got ${destFile.length()}")
+        if (tmpFile.length() != usbFile.length) {
+            AppLog.w("Size mismatch for $relativePath: expected ${usbFile.length}, got ${tmpFile.length()}, deleting partial file")
+            tmpFile.delete()
+            throw java.io.IOException("Size mismatch for $relativePath: expected ${usbFile.length}, got ${tmpFile.length()}")
         }
+
+        tmpFile.renameTo(destFile)
     }
 
     private fun copyFat32LibFile(file: FatFsFile, destDir: File, relativePath: String) {
         val destFile = File(destDir, relativePath)
         destFile.parentFile?.mkdirs()
+        val tmpFile = File(destFile.parentFile, destFile.name + ".tmp")
 
-        FileOutputStream(destFile).use { fos ->
+        FileOutputStream(tmpFile).use { fos ->
             val buffer = ByteArray(8192)
             file.readContents().use { input ->
                 var bytesRead: Int
@@ -959,8 +965,12 @@ class UsbDeviceManager(
             }
         }
 
-        if (destFile.length() != file.length) {
-            AppLog.w("Size mismatch for $relativePath: expected ${file.length}, got ${destFile.length()}")
+        if (tmpFile.length() != file.length) {
+            AppLog.w("Size mismatch for $relativePath: expected ${file.length}, got ${tmpFile.length()}, deleting partial file")
+            tmpFile.delete()
+            throw java.io.IOException("Size mismatch for $relativePath: expected ${file.length}, got ${tmpFile.length()}")
         }
+
+        tmpFile.renameTo(destFile)
     }
 }

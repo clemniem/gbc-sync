@@ -1024,7 +1024,10 @@ class UsbDeviceManager(
             throw java.io.IOException("Size mismatch for $relativePath: expected ${usbFile.length}, got ${tmpFile.length()}")
         }
 
-        tmpFile.renameTo(destFile)
+        if (!tmpFile.renameTo(destFile)) {
+            tmpFile.delete()
+            throw java.io.IOException("Failed to rename tmp file to $relativePath")
+        }
     }
 
     private fun copyFat32LibFile(file: FatFsFile, destDir: File, relativePath: String) {
@@ -1048,6 +1051,9 @@ class UsbDeviceManager(
             throw java.io.IOException("Size mismatch for $relativePath: expected ${file.length}, got ${tmpFile.length()}")
         }
 
-        tmpFile.renameTo(destFile)
+        if (!tmpFile.renameTo(destFile)) {
+            tmpFile.delete()
+            throw java.io.IOException("Failed to rename tmp file to $relativePath")
+        }
     }
 }

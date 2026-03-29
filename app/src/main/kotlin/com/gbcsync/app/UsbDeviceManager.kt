@@ -68,7 +68,9 @@ class UsbDeviceManager(
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     AppLog.d("USB device detached")
                     _connectedDevice.value = null
-                    _syncState.value = SyncState()
+                    if (_syncState.value.status != SyncState.Status.DONE) {
+                        _syncState.value = SyncState()
+                    }
                 }
                 ACTION_USB_PERMISSION -> {
                     val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)

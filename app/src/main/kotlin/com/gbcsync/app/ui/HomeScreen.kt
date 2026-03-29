@@ -314,7 +314,7 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                 }
             }
 
-            if (syncState.status == SyncState.Status.DONE && syncState.safeToDisconnect) {
+            if (syncState.status == SyncState.Status.DONE && syncState.safeToDisconnect && connectedDevice != null) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(

@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
                                 onRetrySync = { usbManager.retrySync() },
                                 onNavigateToSettings = { navController.navigate("settings") },
                                 onOpenGbPrinterWeb = {
-                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://herrzatacke.github.io/gb-printer-web/")))
+                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://herrzatacke.github.io/gb-printer-web/#/import")))
                                 },
                                 onOpenFolder = { path ->
                                     try {

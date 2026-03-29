@@ -11,7 +11,7 @@ data class ImportChoice(
     val message: String,
     val appendLabel: String = "Append",
     val newLabel: String = "Start New",
-    val autoAppendSeconds: Int = 0
+    val autoAppendSeconds: Int = 0,
 )
 
 data class SyncState(
@@ -26,7 +26,7 @@ data class SyncState(
     val cameraChoice: List<CameraType>? = null,
     val targetFolder: String = "",
     val durationMs: Long = 0,
-    val safeToDisconnect: Boolean = false
+    val safeToDisconnect: Boolean = false,
 ) {
     enum class Status { IDLE, CONNECTING, SYNCING, DONE, ERROR }
 
@@ -35,7 +35,10 @@ data class SyncState(
 }
 
 fun UsbMassStorageDevice.closeSafely() {
-    try { close() } catch (_: Exception) {}
+    try {
+        close()
+    } catch (_: Exception) {
+    }
 }
 
 suspend fun finishSync(
@@ -46,25 +49,27 @@ suspend fun finishSync(
     total: Int,
     errors: Int,
     targetFolder: String = "",
-    durationMs: Long = 0
+    durationMs: Long = 0,
 ) {
-    val summary = buildString {
-        append("Sync complete: $copied copied")
-        if (errors > 0) append(", $errors failed")
-    }
+    val summary =
+        buildString {
+            append("Sync complete: $copied copied")
+            if (errors > 0) append(", $errors failed")
+        }
     AppLog.i(summary)
 
-    syncState.value = SyncState(
-        status = if (errors > 0 && copied == 0) SyncState.Status.ERROR else SyncState.Status.DONE,
-        deviceName = deviceName,
-        filesCopied = copied,
-        totalFiles = total,
-        errors = errors,
-        error = if (errors > 0) "$errors file(s) failed to copy" else null,
-        targetFolder = targetFolder,
-        durationMs = durationMs,
-        safeToDisconnect = true
-    )
+    syncState.value =
+        SyncState(
+            status = if (errors > 0 && copied == 0) SyncState.Status.ERROR else SyncState.Status.DONE,
+            deviceName = deviceName,
+            filesCopied = copied,
+            totalFiles = total,
+            errors = errors,
+            error = if (errors > 0) "$errors file(s) failed to copy" else null,
+            targetFolder = targetFolder,
+            durationMs = durationMs,
+            safeToDisconnect = true,
+        )
 
     try {
         repository.addSyncLogEntry(
@@ -75,8 +80,8 @@ suspend fun finishSync(
                 errors = errors,
                 totalBytes = 0,
                 durationMs = durationMs,
-                targetFolder = targetFolder
-            )
+                targetFolder = targetFolder,
+            ),
         )
     } catch (e: Exception) {
         AppLog.w("Failed to write sync log entry: ${e.message}")

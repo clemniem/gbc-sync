@@ -1,6 +1,7 @@
 package com.gbcsync.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.UsbOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -32,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -46,17 +49,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.clickable
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.RadioButton
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.gbcsync.app.SyncState
-import com.gbcsync.app.data.CameraType
 import com.gbcsync.app.data.AppLog
+import com.gbcsync.app.data.CameraType
 import com.gbcsync.app.data.SyncLogEntry
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -76,7 +76,7 @@ fun HomeScreen(
     onOpenFolder: (String) -> Unit = {},
     onContinueImport: () -> Unit = {},
     onNewImport: () -> Unit = {},
-    onCameraChosen: (CameraType) -> Unit = {}
+    onCameraChosen: (CameraType) -> Unit = {},
 ) {
     var selectedTab by remember { mutableIntStateOf(if (debugLogEnabled) 1 else 0) }
 
@@ -93,16 +93,18 @@ fun HomeScreen(
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
-                }
+                },
             )
-        }
+        },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding),
         ) {
-            val isSyncActive = syncState.status == SyncState.Status.SYNCING ||
+            val isSyncActive =
+                syncState.status == SyncState.Status.SYNCING ||
                     syncState.status == SyncState.Status.CONNECTING
 
             if (isSyncActive) {
@@ -111,18 +113,19 @@ fun HomeScreen(
                 SyncAnimation(
                     progress = syncState.progress,
                     isConnecting = syncState.status == SyncState.Status.CONNECTING,
-                    modifier = Modifier.padding(horizontal = 16.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = when (syncState.status) {
-                        SyncState.Status.CONNECTING -> "Connecting to ${syncState.deviceName}..."
-                        SyncState.Status.SYNCING -> "Syncing from ${syncState.deviceName}..."
-                        else -> ""
-                    },
+                    text =
+                        when (syncState.status) {
+                            SyncState.Status.CONNECTING -> "Connecting to ${syncState.deviceName}..."
+                            SyncState.Status.SYNCING -> "Syncing from ${syncState.deviceName}..."
+                            else -> ""
+                        },
                     style = MaterialTheme.typography.titleMedium,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 if (syncState.status == SyncState.Status.SYNCING && syncState.totalFiles > 0) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -130,7 +133,7 @@ fun HomeScreen(
                         text = "${syncState.filesCopied} / ${syncState.totalFiles}",
                         style = MaterialTheme.typography.titleLarge,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 if (syncState.currentFile.isNotEmpty()) {
@@ -143,20 +146,22 @@ fun HomeScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 32.dp)
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 32.dp),
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
             } else {
                 // Normal view: status card + tabs
                 ConnectionStatusCard(
-                    connectedDevice, syncState,
+                    connectedDevice,
+                    syncState,
                     onRetry = onRetrySync,
                     onOpenGbPrinterWeb = onOpenGbPrinterWeb,
                     onOpenFolder = onOpenFolder,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
 
                 if (debugLogEnabled) {
@@ -192,11 +197,11 @@ fun HomeScreen(
             dismissButton = {
                 Button(
                     onClick = onNewImport,
-                    colors = ButtonDefaults.textButtonColors()
+                    colors = ButtonDefaults.textButtonColors(),
                 ) {
                     Text(choice.newLabel)
                 }
-            }
+            },
         )
     }
 
@@ -209,15 +214,16 @@ fun HomeScreen(
                 Column {
                     cameras.forEach { camera ->
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onCameraChosen(camera) }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onCameraChosen(camera) }
+                                    .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             RadioButton(
                                 selected = false,
-                                onClick = { onCameraChosen(camera) }
+                                onClick = { onCameraChosen(camera) },
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(camera.displayName)
@@ -225,7 +231,7 @@ fun HomeScreen(
                     }
                 }
             },
-            confirmButton = {}
+            confirmButton = {},
         )
     }
 }
@@ -237,7 +243,7 @@ private fun SyncHistoryTab(syncLog: List<SyncLogEntry>) {
             text = "No files synced yet. Connect a USB device to start.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(16.dp),
         )
     } else {
         LazyColumn(modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -261,72 +267,89 @@ private fun LiveLogTab(logLines: List<String>) {
 
     LazyColumn(
         state = listState,
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-            .padding(8.dp)
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                .padding(8.dp),
     ) {
         items(logLines) { line ->
-            val color = when {
-                " E " in line -> MaterialTheme.colorScheme.error
-                " W " in line -> MaterialTheme.colorScheme.tertiary
-                " I " in line -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
+            val color =
+                when {
+                    " E " in line -> MaterialTheme.colorScheme.error
+                    " W " in line -> MaterialTheme.colorScheme.tertiary
+                    " I " in line -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
             Text(
                 text = line,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 11.sp,
                 color = color,
                 lineHeight = 14.sp,
-                modifier = Modifier.padding(vertical = 1.dp)
+                modifier = Modifier.padding(vertical = 1.dp),
             )
         }
     }
 }
 
 @Composable
-private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState, onRetry: () -> Unit, onOpenGbPrinterWeb: () -> Unit, onOpenFolder: (String) -> Unit = {}, modifier: Modifier = Modifier) {
+private fun ConnectionStatusCard(
+    connectedDevice: String?,
+    syncState: SyncState,
+    onRetry: () -> Unit,
+    onOpenGbPrinterWeb: () -> Unit,
+    onOpenFolder: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = when (syncState.status) {
-                SyncState.Status.IDLE -> if (connectedDevice != null)
-                    MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceVariant
-                SyncState.Status.CONNECTING -> MaterialTheme.colorScheme.primaryContainer
-                SyncState.Status.SYNCING -> MaterialTheme.colorScheme.primaryContainer
-                SyncState.Status.DONE -> MaterialTheme.colorScheme.secondaryContainer
-                SyncState.Status.ERROR -> MaterialTheme.colorScheme.errorContainer
-            }
-        )
+        colors =
+            CardDefaults.cardColors(
+                containerColor =
+                    when (syncState.status) {
+                        SyncState.Status.IDLE ->
+                            if (connectedDevice != null) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            }
+                        SyncState.Status.CONNECTING -> MaterialTheme.colorScheme.primaryContainer
+                        SyncState.Status.SYNCING -> MaterialTheme.colorScheme.primaryContainer
+                        SyncState.Status.DONE -> MaterialTheme.colorScheme.secondaryContainer
+                        SyncState.Status.ERROR -> MaterialTheme.colorScheme.errorContainer
+                    },
+            ),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = when {
-                        syncState.status == SyncState.Status.ERROR -> Icons.Default.Error
-                        syncState.status == SyncState.Status.DONE -> Icons.Default.CheckCircle
-                        connectedDevice != null -> Icons.Default.Usb
-                        else -> Icons.Default.UsbOff
-                    },
+                    imageVector =
+                        when {
+                            syncState.status == SyncState.Status.ERROR -> Icons.Default.Error
+                            syncState.status == SyncState.Status.DONE -> Icons.Default.CheckCircle
+                            connectedDevice != null -> Icons.Default.Usb
+                            else -> Icons.Default.UsbOff
+                        },
                     contentDescription = null,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(24.dp),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = when (syncState.status) {
-                        SyncState.Status.IDLE -> connectedDevice ?: "No device connected"
-                        SyncState.Status.CONNECTING -> "Connecting to ${syncState.deviceName}..."
-                        SyncState.Status.SYNCING -> "Syncing from ${syncState.deviceName}..."
-                        SyncState.Status.DONE -> when {
-                            syncState.filesCopied == 0 && syncState.errors == 0 -> "All files up to date"
-                            syncState.errors > 0 -> "Copied ${syncState.filesCopied}, ${syncState.errors} failed"
-                            else -> "Done! Copied ${syncState.filesCopied} file(s)"
-                        }
-                        SyncState.Status.ERROR -> "Error: ${syncState.error}"
-                    },
-                    style = MaterialTheme.typography.titleSmall
+                    text =
+                        when (syncState.status) {
+                            SyncState.Status.IDLE -> connectedDevice ?: "No device connected"
+                            SyncState.Status.CONNECTING -> "Connecting to ${syncState.deviceName}..."
+                            SyncState.Status.SYNCING -> "Syncing from ${syncState.deviceName}..."
+                            SyncState.Status.DONE ->
+                                when {
+                                    syncState.filesCopied == 0 && syncState.errors == 0 -> "All files up to date"
+                                    syncState.errors > 0 -> "Copied ${syncState.filesCopied}, ${syncState.errors} failed"
+                                    else -> "Done! Copied ${syncState.filesCopied} file(s)"
+                                }
+                            SyncState.Status.ERROR -> "Error: ${syncState.error}"
+                        },
+                    style = MaterialTheme.typography.titleSmall,
                 )
             }
 
@@ -337,7 +360,7 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = syncState.currentFile,
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
@@ -347,19 +370,19 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                 if (syncState.totalFiles > 0) {
                     LinearProgressIndicator(
                         progress = { syncState.progress },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "${syncState.filesCopied}/${syncState.totalFiles}: ${syncState.currentFile}",
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 } else {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = syncState.currentFile,
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
@@ -371,19 +394,20 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                         imageVector = Icons.Default.UsbOff,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Safe to disconnect USB cable",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
                     )
                 }
             }
 
             if (syncState.status == SyncState.Status.ERROR ||
-                (syncState.status == SyncState.Status.DONE && syncState.errors > 0)) {
+                (syncState.status == SyncState.Status.DONE && syncState.errors > 0)
+            ) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = onRetry) {
                     Text("Retry Sync")
@@ -394,15 +418,16 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                 if (syncState.targetFolder.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     val folderName = syncState.targetFolder.substringAfterLast('/')
-                    val statsText = buildString {
-                        append("${syncState.filesCopied} file${if (syncState.filesCopied != 1) "s" else ""}")
-                        if (syncState.durationMs > 0) append(" in ${formatDuration(syncState.durationMs)}")
-                        append(" \u2022 $folderName")
-                    }
+                    val statsText =
+                        buildString {
+                            append("${syncState.filesCopied} file${if (syncState.filesCopied != 1) "s" else ""}")
+                            if (syncState.durationMs > 0) append(" in ${formatDuration(syncState.durationMs)}")
+                            append(" \u2022 $folderName")
+                        }
                     Text(
                         text = statsText,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                 }
 
@@ -411,9 +436,10 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                     if (syncState.targetFolder.isNotEmpty()) {
                         Button(
                             onClick = { onOpenFolder(syncState.targetFolder) },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.secondary
-                            )
+                            colors =
+                                ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondary,
+                                ),
                         ) {
                             Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
@@ -422,9 +448,10 @@ private fun ConnectionStatusCard(connectedDevice: String?, syncState: SyncState,
                     }
                     Button(
                         onClick = onOpenGbPrinterWeb,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.tertiary
-                        )
+                        colors =
+                            ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary,
+                            ),
                     ) {
                         Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
@@ -441,32 +468,35 @@ private fun SyncLogItem(entry: SyncLogEntry) {
     val dateFormat = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = buildString {
-                    append("${entry.filesCopied} file${if (entry.filesCopied != 1) "s" else ""} synced")
-                    if (entry.errors > 0) append(", ${entry.errors} failed")
-                },
-                style = MaterialTheme.typography.bodyMedium
+                text =
+                    buildString {
+                        append("${entry.filesCopied} file${if (entry.filesCopied != 1) "s" else ""} synced")
+                        if (entry.errors > 0) append(", ${entry.errors} failed")
+                    },
+                style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                text = buildString {
-                    append(entry.deviceName)
-                    if (entry.durationMs > 0) append(" \u2022 ${formatDuration(entry.durationMs)}")
-                },
+                text =
+                    buildString {
+                        append(entry.deviceName)
+                        if (entry.durationMs > 0) append(" \u2022 ${formatDuration(entry.durationMs)}")
+                    },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Text(
             text = dateFormat.format(Date(entry.timestamp)),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -486,23 +516,25 @@ private fun formatDuration(ms: Long): String {
 private fun HomeScreenPreview() {
     MaterialTheme {
         HomeScreen(
-            syncState = SyncState(
-                status = SyncState.Status.SYNCING,
-                deviceName = "Joey Jr",
-                currentFile = "GBC_001.bmp",
-                filesCopied = 3,
-                totalFiles = 12
-            ),
+            syncState =
+                SyncState(
+                    status = SyncState.Status.SYNCING,
+                    deviceName = "Joey Jr",
+                    currentFile = "GBC_001.bmp",
+                    filesCopied = 3,
+                    totalFiles = 12,
+                ),
             connectedDevice = "Joey Jr",
-            syncLog = listOf(
-                SyncLogEntry("Joey Jr", System.currentTimeMillis() - 3600_000, 24, 0, 0, 45_000, "/storage/gbc-sync"),
-                SyncLogEntry("2bitBridge", System.currentTimeMillis() - 86400_000, 8, 1, 0, 12_000, "/storage/gbc-sync")
-            ),
+            syncLog =
+                listOf(
+                    SyncLogEntry("Joey Jr", System.currentTimeMillis() - 3600_000, 24, 0, 0, 45_000, "/storage/gbc-sync"),
+                    SyncLogEntry("2bitBridge", System.currentTimeMillis() - 86400_000, 8, 1, 0, 12_000, "/storage/gbc-sync"),
+                ),
             logLines = listOf("[I] Syncing Joey Jr", "[D] Copying GBC_001.bmp"),
             debugLogEnabled = false,
             onRetrySync = {},
             onNavigateToSettings = {},
-            onOpenGbPrinterWeb = {}
+            onOpenGbPrinterWeb = {},
         )
     }
 }
@@ -516,7 +548,7 @@ private fun ConnectionStatusCardIdlePreview() {
             syncState = SyncState(),
             onRetry = {},
             onOpenGbPrinterWeb = {},
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(16.dp),
         )
     }
 }
@@ -527,18 +559,19 @@ private fun ConnectionStatusCardDonePreview() {
     MaterialTheme {
         ConnectionStatusCard(
             connectedDevice = "Joey Jr",
-            syncState = SyncState(
-                status = SyncState.Status.DONE,
-                deviceName = "Joey Jr",
-                filesCopied = 24,
-                totalFiles = 24,
-                targetFolder = "/storage/gbc-sync/joey-jr",
-                durationMs = 45_000,
-                safeToDisconnect = true
-            ),
+            syncState =
+                SyncState(
+                    status = SyncState.Status.DONE,
+                    deviceName = "Joey Jr",
+                    filesCopied = 24,
+                    totalFiles = 24,
+                    targetFolder = "/storage/gbc-sync/joey-jr",
+                    durationMs = 45_000,
+                    safeToDisconnect = true,
+                ),
             onRetry = {},
             onOpenGbPrinterWeb = {},
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(16.dp),
         )
     }
 }
@@ -549,13 +582,14 @@ private fun ConnectionStatusCardErrorPreview() {
     MaterialTheme {
         ConnectionStatusCard(
             connectedDevice = "Joey Jr",
-            syncState = SyncState(
-                status = SyncState.Status.ERROR,
-                error = "USB connection lost"
-            ),
+            syncState =
+                SyncState(
+                    status = SyncState.Status.ERROR,
+                    error = "USB connection lost",
+                ),
             onRetry = {},
             onOpenGbPrinterWeb = {},
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(16.dp),
         )
     }
 }

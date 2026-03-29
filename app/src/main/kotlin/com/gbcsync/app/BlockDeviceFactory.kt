@@ -2,14 +2,17 @@ package com.gbcsync.app
 
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbEndpoint
+import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import com.gbcsync.app.data.AppLog
 import kotlinx.coroutines.delay
 import me.jahnen.libaums.core.driver.BlockDeviceDriver
 import java.nio.ByteBuffer
 
-class BlockDeviceFactory(private val usbManager: UsbManager) {
-
+class BlockDeviceFactory(
+    private val usbManager: UsbManager,
+) {
     companion object {
         private const val MAX_INIT_RETRIES = 3
     }
@@ -20,7 +23,7 @@ class BlockDeviceFactory(private val usbManager: UsbManager) {
      * Retries with progressive backoff if the device doesn't respond.
      */
     suspend fun getRawBlockDeviceFresh(usbDevice: UsbDevice): RawScsiBlockDevice? {
-        var massStorageInterface: android.hardware.usb.UsbInterface? = null
+        var massStorageInterface: UsbInterface? = null
         for (i in 0 until usbDevice.interfaceCount) {
             val iface = usbDevice.getInterface(i)
             if (iface.interfaceClass == UsbConstants.USB_CLASS_MASS_STORAGE) {
@@ -33,13 +36,16 @@ class BlockDeviceFactory(private val usbManager: UsbManager) {
             return null
         }
 
-        var inEndpoint: android.hardware.usb.UsbEndpoint? = null
-        var outEndpoint: android.hardware.usb.UsbEndpoint? = null
+        var inEndpoint: UsbEndpoint? = null
+        var outEndpoint: UsbEndpoint? = null
         for (i in 0 until massStorageInterface.endpointCount) {
             val ep = massStorageInterface.getEndpoint(i)
             if (ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK) {
-                if (ep.direction == UsbConstants.USB_DIR_IN) inEndpoint = ep
-                else outEndpoint = ep
+                if (ep.direction == UsbConstants.USB_DIR_IN) {
+                    inEndpoint = ep
+                } else {
+                    outEndpoint = ep
+                }
             }
         }
         if (inEndpoint == null || outEndpoint == null) {
@@ -109,7 +115,8 @@ class BlockDeviceFactory(private val usbManager: UsbManager) {
 
             val partOffset = 446
             val partType = data[partOffset + 4].toInt() and 0xFF
-            val lbaStart = ((data[partOffset + 8].toInt() and 0xFF)) or
+            val lbaStart =
+                ((data[partOffset + 8].toInt() and 0xFF)) or
                     ((data[partOffset + 9].toInt() and 0xFF) shl 8) or
                     ((data[partOffset + 10].toInt() and 0xFF) shl 16) or
                     ((data[partOffset + 11].toInt() and 0xFF) shl 24)

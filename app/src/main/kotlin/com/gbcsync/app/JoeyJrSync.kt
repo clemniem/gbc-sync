@@ -16,7 +16,7 @@ class JoeyJrSync(
     private val repository: SyncRepository,
     private val fileCopier: FileCopier,
     private val blockDeviceFactory: BlockDeviceFactory,
-    private val syncState: MutableStateFlow<SyncState>
+    private val syncState: MutableStateFlow<SyncState>,
 ) {
     var cameraChoiceDeferred: CompletableDeferred<CameraType>? = null
 
@@ -28,7 +28,7 @@ class JoeyJrSync(
         storageDevice: UsbMassStorageDevice,
         config: DeviceConfig,
         destDir: File,
-        deviceName: String
+        deviceName: String,
     ) {
         // Step 1: Try libaums
         AppLog.i("[JoeyJr] Attempting libaums init...")
@@ -60,10 +60,11 @@ class JoeyJrSync(
         val freshDevice = blockDeviceFactory.getRawBlockDeviceFresh(storageDevice.usbDevice)
         if (freshDevice == null) {
             AppLog.e("[JoeyJr] Cannot access block device via raw SCSI")
-            syncState.value = SyncState(
-                status = SyncState.Status.ERROR,
-                error = "Cannot access USB device. Try unplugging and re-plugging."
-            )
+            syncState.value =
+                SyncState(
+                    status = SyncState.Status.ERROR,
+                    error = "Cannot access USB device. Try unplugging and re-plugging.",
+                )
             return
         }
 
@@ -72,9 +73,11 @@ class JoeyJrSync(
             AppLog.d("[JoeyJr] Partition offset: $partitionOffset")
             val fatReader = Fat12Reader(freshDevice, partitionOffset)
 
-            val hasRomGbc = fatReader.listRootFiles("ROM.GBC") { name, filter ->
-                name.equals(filter, ignoreCase = true)
-            }.isNotEmpty()
+            val hasRomGbc =
+                fatReader
+                    .listRootFiles("ROM.GBC") { name, filter ->
+                        name.equals(filter, ignoreCase = true)
+                    }.isNotEmpty()
             val camera = detectOrPickCamera(hasRomGbc)
             AppLog.i("[JoeyJr] Camera: ${camera.displayName}")
 
@@ -82,9 +85,11 @@ class JoeyJrSync(
             AppLog.i("[JoeyJr] Sync complete via raw SCSI")
         } catch (e: Exception) {
             AppLog.e("[JoeyJr] FAT reader sync error", e)
-            syncState.value = SyncState(
-                status = SyncState.Status.ERROR, error = e.message ?: "Unknown error"
-            )
+            syncState.value =
+                SyncState(
+                    status = SyncState.Status.ERROR,
+                    error = e.message ?: "Unknown error",
+                )
         }
     }
 
@@ -94,7 +99,7 @@ class JoeyJrSync(
         config: DeviceConfig,
         destDir: File,
         deviceName: String,
-        camera: CameraType? = null
+        camera: CameraType? = null,
     ) {
         try {
             AppLog.i("Syncing $deviceName -> ${destDir.absolutePath}")
@@ -108,28 +113,30 @@ class JoeyJrSync(
             fileCopier.collectLibaumsFiles(root, "", config.fileFilter, config.recursive, filesToCopy)
             AppLog.d("Found ${filesToCopy.size} matching file(s) on device")
 
-            val newFiles = filesToCopy.filter { (usbFile, relativePath) ->
-                val fileName = if (relativePath.isNotEmpty()) relativePath else usbFile.name
-                if (fileName.lowercase().endsWith(".sav")) {
-                    try {
-                        val content = fileCopier.readUsbFileContent(usbFile, fs)
-                        val targetPath = fileCopier.formatTargetPath(fileName, camera?.filePrefix)
-                        repository.shouldCopySavFile(targetPath, content, destDir)
-                    } catch (e: Exception) {
-                        AppLog.w("Hash check failed for $fileName, will copy: ${e.message}")
-                        true
+            val newFiles =
+                filesToCopy.filter { (usbFile, relativePath) ->
+                    val fileName = if (relativePath.isNotEmpty()) relativePath else usbFile.name
+                    if (fileName.lowercase().endsWith(".sav")) {
+                        try {
+                            val content = fileCopier.readUsbFileContent(usbFile, fs)
+                            val targetPath = fileCopier.formatTargetPath(fileName, camera?.filePrefix)
+                            repository.shouldCopySavFile(targetPath, content, destDir)
+                        } catch (e: Exception) {
+                            AppLog.w("Hash check failed for $fileName, will copy: ${e.message}")
+                            true
+                        }
+                    } else {
+                        repository.shouldCopyFile(fileName, usbFile.length, destDir)
                     }
-                } else {
-                    repository.shouldCopyFile(fileName, usbFile.length, destDir)
                 }
-            }
             AppLog.i("${newFiles.size} new file(s) to copy (${filesToCopy.size - newFiles.size} already synced)")
 
             syncState.value = syncState.value.copy(totalFiles = newFiles.size)
 
             if (newFiles.isEmpty()) {
                 AppLog.i("All files up to date")
-                syncState.value = SyncState(status = SyncState.Status.DONE, deviceName = deviceName, targetFolder = destDir.absolutePath, safeToDisconnect = true)
+                syncState.value =
+                    SyncState(status = SyncState.Status.DONE, deviceName = deviceName, targetFolder = destDir.absolutePath, safeToDisconnect = true)
                 return
             }
 
@@ -171,37 +178,39 @@ class JoeyJrSync(
         config: DeviceConfig,
         destDir: File,
         deviceName: String,
-        camera: CameraType? = null
+        camera: CameraType? = null,
     ) {
         AppLog.i("Syncing $deviceName -> ${destDir.absolutePath} (via ${fatReader.fatType} reader)")
         syncState.value = SyncState(status = SyncState.Status.SYNCING, deviceName = deviceName, currentFile = "Scanning files...")
 
         AppLog.d("Scanning files (filter=${config.fileFilter}, recursive=${config.recursive})...")
-        val allFiles = if (config.recursive) {
-            fatReader.listFilesRecursive(config.fileFilter) { name, filter ->
-                repository.matchesFilter(name, filter)
-            }
-        } else {
-            fatReader.listRootFiles(config.fileFilter) { name, filter ->
-                repository.matchesFilter(name, filter)
-            }
-        }
-        AppLog.d("Found ${allFiles.size} matching file(s) on device")
-
-        val newFiles = allFiles.filter { file ->
-            if (file.name.lowercase().endsWith(".sav")) {
-                try {
-                    val content = fileCopier.readFatFileContent(file)
-                    val targetPath = fileCopier.formatTargetPath(file.relativePath, camera?.filePrefix)
-                    repository.shouldCopySavFile(targetPath, content, destDir)
-                } catch (e: Exception) {
-                    AppLog.w("Hash check failed for ${file.name}, will copy: ${e.message}")
-                    true
+        val allFiles =
+            if (config.recursive) {
+                fatReader.listFilesRecursive(config.fileFilter) { name, filter ->
+                    repository.matchesFilter(name, filter)
                 }
             } else {
-                repository.shouldCopyFile(file.relativePath, file.length, destDir)
+                fatReader.listRootFiles(config.fileFilter) { name, filter ->
+                    repository.matchesFilter(name, filter)
+                }
             }
-        }
+        AppLog.d("Found ${allFiles.size} matching file(s) on device")
+
+        val newFiles =
+            allFiles.filter { file ->
+                if (file.name.lowercase().endsWith(".sav")) {
+                    try {
+                        val content = fileCopier.readFatFileContent(file)
+                        val targetPath = fileCopier.formatTargetPath(file.relativePath, camera?.filePrefix)
+                        repository.shouldCopySavFile(targetPath, content, destDir)
+                    } catch (e: Exception) {
+                        AppLog.w("Hash check failed for ${file.name}, will copy: ${e.message}")
+                        true
+                    }
+                } else {
+                    repository.shouldCopyFile(file.relativePath, file.length, destDir)
+                }
+            }
         AppLog.i("${newFiles.size} new file(s) to copy (${allFiles.size - newFiles.size} already synced)")
 
         syncState.value = syncState.value.copy(totalFiles = newFiles.size)
@@ -237,14 +246,16 @@ class JoeyJrSync(
         finishSync(syncState, repository, deviceName, copied, newFiles.size, errors, destDir.absolutePath, durationMs)
     }
 
-    private fun hasFileOnRoot(rootDir: UsbFile, fileName: String): Boolean {
-        return try {
+    private fun hasFileOnRoot(
+        rootDir: UsbFile,
+        fileName: String,
+    ): Boolean =
+        try {
             rootDir.listFiles().any { it.name.equals(fileName, ignoreCase = true) }
         } catch (e: Exception) {
             AppLog.w("Error checking for $fileName on root: ${e.message}")
             false
         }
-    }
 
     private suspend fun ownedOrDefault(default: CameraType): CameraType {
         val owned = repository.ownedCameras.first()

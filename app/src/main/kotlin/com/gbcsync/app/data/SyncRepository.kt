@@ -22,7 +22,10 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
  * @param displayName shown in UI
  * @param filePrefix prepended to synced file names
  */
-data class CameraType(val displayName: String, val filePrefix: String) {
+data class CameraType(
+    val displayName: String,
+    val filePrefix: String,
+) {
     companion object {
         // --- Game Boy Camera colors ---
         val GB_CAMERA_GREEN = CameraType("Game Boy Camera (Green)", "grn")
@@ -58,7 +61,7 @@ data class DeviceConfig(
     val productId: Int,
     val fileFilter: String = "*",
     val destFolder: String = "",
-    val recursive: Boolean = false
+    val recursive: Boolean = false,
 )
 
 data class SyncLogEntry(
@@ -68,11 +71,12 @@ data class SyncLogEntry(
     val errors: Int,
     val totalBytes: Long,
     val durationMs: Long,
-    val targetFolder: String
+    val targetFolder: String,
 )
 
-class SyncRepository(private val context: Context) {
-
+class SyncRepository(
+    private val context: Context,
+) {
     private val gson = Gson()
 
     private companion object {
@@ -86,14 +90,15 @@ class SyncRepository(private val context: Context) {
 
     // --- Device Configs ---
 
-    val deviceConfigs: Flow<List<DeviceConfig>> = context.dataStore.data.map { prefs ->
-        val json = prefs[DEVICES_KEY] ?: return@map defaultDevices()
-        try {
-            gson.fromJson(json, object : TypeToken<List<DeviceConfig>>() {}.type)
-        } catch (_: Exception) {
-            defaultDevices()
+    val deviceConfigs: Flow<List<DeviceConfig>> =
+        context.dataStore.data.map { prefs ->
+            val json = prefs[DEVICES_KEY] ?: return@map defaultDevices()
+            try {
+                gson.fromJson(json, object : TypeToken<List<DeviceConfig>>() {}.type)
+            } catch (_: Exception) {
+                defaultDevices()
+            }
         }
-    }
 
     suspend fun saveDeviceConfigs(devices: List<DeviceConfig>) {
         context.dataStore.edit { prefs ->
@@ -101,33 +106,35 @@ class SyncRepository(private val context: Context) {
         }
     }
 
-    private fun defaultDevices(): List<DeviceConfig> = listOf(
-        DeviceConfig(
-            name = "JoeyJr",
-            vendorId = 49745,
-            productId = 8224,
-            fileFilter = "*.sav",
-            recursive = false
-        ),
-        DeviceConfig(
-            name = "PicNRec",
-            vendorId = 9114,
-            productId = 51966,
-            fileFilter = "*.png",
-            recursive = true
+    private fun defaultDevices(): List<DeviceConfig> =
+        listOf(
+            DeviceConfig(
+                name = "JoeyJr",
+                vendorId = 49745,
+                productId = 8224,
+                fileFilter = "*.sav",
+                recursive = false,
+            ),
+            DeviceConfig(
+                name = "PicNRec",
+                vendorId = 9114,
+                productId = 51966,
+                fileFilter = "*.png",
+                recursive = true,
+            ),
         )
-    )
 
     // --- Owned Cameras ---
 
-    val ownedCameras: Flow<Set<CameraType>> = context.dataStore.data.map { prefs ->
-        val json = prefs[OWNED_CAMERAS_KEY] ?: return@map emptySet()
-        try {
-            gson.fromJson<Set<CameraType>>(json, object : TypeToken<Set<CameraType>>() {}.type)
-        } catch (_: Exception) {
-            emptySet()
+    val ownedCameras: Flow<Set<CameraType>> =
+        context.dataStore.data.map { prefs ->
+            val json = prefs[OWNED_CAMERAS_KEY] ?: return@map emptySet()
+            try {
+                gson.fromJson<Set<CameraType>>(json, object : TypeToken<Set<CameraType>>() {}.type)
+            } catch (_: Exception) {
+                emptySet()
+            }
         }
-    }
 
     suspend fun saveOwnedCameras(cameras: Set<CameraType>) {
         context.dataStore.edit { prefs ->
@@ -144,9 +151,10 @@ class SyncRepository(private val context: Context) {
 
     // --- Base Folder ---
 
-    val baseFolder: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[BASE_FOLDER_KEY] ?: DEFAULT_BASE_FOLDER
-    }
+    val baseFolder: Flow<String> =
+        context.dataStore.data.map { prefs ->
+            prefs[BASE_FOLDER_KEY] ?: DEFAULT_BASE_FOLDER
+        }
 
     suspend fun setBaseFolder(folder: String) {
         context.dataStore.edit { prefs ->
@@ -156,9 +164,10 @@ class SyncRepository(private val context: Context) {
 
     // --- Debug Logging ---
 
-    val debugLogEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[DEBUG_LOG_KEY] ?: false
-    }
+    val debugLogEnabled: Flow<Boolean> =
+        context.dataStore.data.map { prefs ->
+            prefs[DEBUG_LOG_KEY] ?: false
+        }
 
     suspend fun setDebugLogEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs ->
@@ -168,23 +177,25 @@ class SyncRepository(private val context: Context) {
 
     // --- Sync Log ---
 
-    val syncLog: Flow<List<SyncLogEntry>> = context.dataStore.data.map { prefs ->
-        val json = prefs[SYNC_LOG_KEY] ?: return@map emptyList()
-        try {
-            gson.fromJson(json, object : TypeToken<List<SyncLogEntry>>() {}.type)
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    suspend fun addSyncLogEntry(entry: SyncLogEntry) {
-        context.dataStore.edit { prefs ->
-            val existing: List<SyncLogEntry> = try {
-                val json = prefs[SYNC_LOG_KEY] ?: "[]"
+    val syncLog: Flow<List<SyncLogEntry>> =
+        context.dataStore.data.map { prefs ->
+            val json = prefs[SYNC_LOG_KEY] ?: return@map emptyList()
+            try {
                 gson.fromJson(json, object : TypeToken<List<SyncLogEntry>>() {}.type)
             } catch (_: Exception) {
                 emptyList()
             }
+        }
+
+    suspend fun addSyncLogEntry(entry: SyncLogEntry) {
+        context.dataStore.edit { prefs ->
+            val existing: List<SyncLogEntry> =
+                try {
+                    val json = prefs[SYNC_LOG_KEY] ?: "[]"
+                    gson.fromJson(json, object : TypeToken<List<SyncLogEntry>>() {}.type)
+                } catch (_: Exception) {
+                    emptyList()
+                }
             val updated = (listOf(entry) + existing).take(100)
             prefs[SYNC_LOG_KEY] = gson.toJson(updated)
         }
@@ -192,17 +203,25 @@ class SyncRepository(private val context: Context) {
 
     // --- File Operations ---
 
-    fun getDestDir(deviceConfig: DeviceConfig, baseFolder: String = DEFAULT_BASE_FOLDER): File {
+    fun getDestDir(
+        deviceConfig: DeviceConfig,
+        baseFolder: String = DEFAULT_BASE_FOLDER,
+    ): File {
         val base = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val folder = if (deviceConfig.destFolder.isNotBlank()) {
-            deviceConfig.destFolder
-        } else {
-            "$baseFolder/${deviceConfig.name}"
-        }
+        val folder =
+            if (deviceConfig.destFolder.isNotBlank()) {
+                deviceConfig.destFolder
+            } else {
+                "$baseFolder/${deviceConfig.name}"
+            }
         return File(base, folder).also { it.mkdirs() }
     }
 
-    fun shouldCopyFile(fileName: String, fileSize: Long, destDir: File): Boolean {
+    fun shouldCopyFile(
+        fileName: String,
+        fileSize: Long,
+        destDir: File,
+    ): Boolean {
         val destFile = File(destDir, fileName)
         if (!destFile.exists()) return true
         // Skip if same name and size (already synced)
@@ -213,7 +232,11 @@ class SyncRepository(private val context: Context) {
      * Check if a .sav file needs copying by comparing MD5 of local file against device content.
      * Returns true if the file should be copied (doesn't exist locally or content differs).
      */
-    fun shouldCopySavFile(fileName: String, deviceContent: ByteArray, destDir: File): Boolean {
+    fun shouldCopySavFile(
+        fileName: String,
+        deviceContent: ByteArray,
+        destDir: File,
+    ): Boolean {
         val destFile = File(destDir, fileName)
         if (!destFile.exists()) return true
         if (destFile.length() != deviceContent.size.toLong()) return true
@@ -229,15 +252,19 @@ class SyncRepository(private val context: Context) {
 
     private val filterRegexCache = ConcurrentHashMap<String, Regex>()
 
-    fun matchesFilter(fileName: String, filter: String): Boolean {
+    fun matchesFilter(
+        fileName: String,
+        filter: String,
+    ): Boolean {
         if (filter == "*") return true
-        val regex = filterRegexCache.getOrPut(filter) {
-            filter
-                .replace(".", "\\.")
-                .replace("*", ".*")
-                .replace("?", ".")
-                .let { Regex(it, RegexOption.IGNORE_CASE) }
-        }
+        val regex =
+            filterRegexCache.getOrPut(filter) {
+                filter
+                    .replace(".", "\\.")
+                    .replace("*", ".*")
+                    .replace("?", ".")
+                    .let { Regex(it, RegexOption.IGNORE_CASE) }
+            }
         return regex.matches(fileName)
     }
 }

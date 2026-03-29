@@ -33,7 +33,10 @@ object AppLog {
         if (enabled) append("W", message)
     }
 
-    fun e(message: String, throwable: Throwable? = null) {
+    fun e(
+        message: String,
+        throwable: Throwable? = null,
+    ) {
         Log.e(TAG, message, throwable)
         if (enabled) {
             append("E", message)
@@ -45,7 +48,10 @@ object AppLog {
         _lines.update { emptyList() }
     }
 
-    private fun append(level: String, message: String) {
+    private fun append(
+        level: String,
+        message: String,
+    ) {
         val timestamp = LocalTime.now().format(timeFormatter)
         val line = "$timestamp $level $message"
         _lines.update { current -> (current + line).takeLast(MAX_LINES) }

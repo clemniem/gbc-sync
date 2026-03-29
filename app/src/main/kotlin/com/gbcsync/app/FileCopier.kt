@@ -11,14 +11,15 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class FileCopier(private val repository: SyncRepository) {
-
+class FileCopier(
+    private val repository: SyncRepository,
+) {
     fun collectLibaumsFiles(
         dir: UsbFile,
         pathPrefix: String,
         filter: String,
         recursive: Boolean,
-        result: MutableList<Pair<UsbFile, String>>
+        result: MutableList<Pair<UsbFile, String>>,
     ) {
         try {
             for (file in dir.listFiles()) {
@@ -40,15 +41,16 @@ class FileCopier(private val repository: SyncRepository) {
     }
 
     /** Read a small USB file entirely into memory (for hash comparison of .sav files). */
-    fun readUsbFileContent(usbFile: UsbFile, fs: FileSystem): ByteArray {
+    fun readUsbFileContent(
+        usbFile: UsbFile,
+        fs: FileSystem,
+    ): ByteArray {
         val inputStream = UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
         return inputStream.use { it.readBytes() }
     }
 
     /** Read a small FatFsFile entirely into memory (for hash comparison of .sav files). */
-    fun readFatFileContent(file: FatFsFile): ByteArray {
-        return file.readContents().use { it.readBytes() }
-    }
+    fun readFatFileContent(file: FatFsFile): ByteArray = file.readContents().use { it.readBytes() }
 
     /**
      * Builds the target path for a synced file.
@@ -56,7 +58,10 @@ class FileCopier(private val repository: SyncRepository) {
      * e.g. "grn/2026-03-05_112233-grn.sav"
      * If no infix, returns the original path unchanged.
      */
-    fun formatTargetPath(originalPath: String, infix: String?): String {
+    fun formatTargetPath(
+        originalPath: String,
+        infix: String?,
+    ): String {
         if (infix == null) return originalPath
         val fileName = originalPath.substringAfterLast('/')
         val ext = fileName.substringAfterLast('.', "")
@@ -70,7 +75,14 @@ class FileCopier(private val repository: SyncRepository) {
      *   FatFile.flush() sending SCSI WRITE commands that corrupt RP2040 USB state.
      *   Only needed for Bridge; JoeyJr can close normally.
      */
-    fun copyLibaumsFile(usbFile: UsbFile, destDir: File, relativePath: String, chunkSize: Int, fs: FileSystem, skipClose: Boolean = false) {
+    fun copyLibaumsFile(
+        usbFile: UsbFile,
+        destDir: File,
+        relativePath: String,
+        chunkSize: Int,
+        fs: FileSystem,
+        skipClose: Boolean = false,
+    ) {
         val destFile = File(destDir, relativePath)
         destFile.parentFile?.mkdirs()
         val tmpFile = File(destFile.parentFile, destFile.name + ".tmp")
@@ -101,7 +113,11 @@ class FileCopier(private val repository: SyncRepository) {
         }
     }
 
-    fun copyFat32LibFile(file: FatFsFile, destDir: File, relativePath: String) {
+    fun copyFat32LibFile(
+        file: FatFsFile,
+        destDir: File,
+        relativePath: String,
+    ) {
         val destFile = File(destDir, relativePath)
         destFile.parentFile?.mkdirs()
         val tmpFile = File(destFile.parentFile, destFile.name + ".tmp")

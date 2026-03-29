@@ -22,9 +22,9 @@ class RawScsiBlockDevice(
     private val connection: UsbDeviceConnection,
     private val outEndpoint: UsbEndpoint,
     private val inEndpoint: UsbEndpoint,
-    private val usbInterface: UsbInterface
-) : BlockDeviceDriver, Closeable {
-
+    private val usbInterface: UsbInterface,
+) : BlockDeviceDriver,
+    Closeable {
     private var _blockSize = 512
     private var _lastBlockAddress = Int.MAX_VALUE
     private val tag = AtomicInteger(1)
@@ -67,11 +67,13 @@ class RawScsiBlockDevice(
                 val cswBuf = ByteArray(13)
                 connection.bulkTransfer(inEndpoint, cswBuf, cswBuf.size, 5000)
 
-                val lastLba = ((buf[0].toInt() and 0xFF) shl 24) or
+                val lastLba =
+                    ((buf[0].toInt() and 0xFF) shl 24) or
                         ((buf[1].toInt() and 0xFF) shl 16) or
                         ((buf[2].toInt() and 0xFF) shl 8) or
                         (buf[3].toInt() and 0xFF)
-                val blkSize = ((buf[4].toInt() and 0xFF) shl 24) or
+                val blkSize =
+                    ((buf[4].toInt() and 0xFF) shl 24) or
                         ((buf[5].toInt() and 0xFF) shl 16) or
                         ((buf[6].toInt() and 0xFF) shl 8) or
                         (buf[7].toInt() and 0xFF)
@@ -118,13 +120,21 @@ class RawScsiBlockDevice(
         }
     }
 
-    override fun read(deviceOffset: Long, buffer: ByteBuffer) {
+    override fun read(
+        deviceOffset: Long,
+        buffer: ByteBuffer,
+    ) {
         val blockCount = buffer.remaining() / _blockSize
         if (blockCount == 0) return
 
         val lba = deviceOffset
-        val cbw = buildCbw(tag.getAndIncrement(), blockCount * _blockSize, 0x80,
-            buildRead10(lba.toInt(), blockCount))
+        val cbw =
+            buildCbw(
+                tag.getAndIncrement(),
+                blockCount * _blockSize,
+                0x80,
+                buildRead10(lba.toInt(), blockCount),
+            )
         sendCbw(cbw)
         val data = receiveData(blockCount * _blockSize)
         receiveCSW()
@@ -132,13 +142,17 @@ class RawScsiBlockDevice(
         buffer.put(data, 0, minOf(data.size, buffer.remaining()))
     }
 
-    override fun write(deviceOffset: Long, buffer: ByteBuffer) {
-        throw UnsupportedOperationException("Write not supported by RawScsiBlockDevice")
-    }
+    override fun write(
+        deviceOffset: Long,
+        buffer: ByteBuffer,
+    ): Unit = throw UnsupportedOperationException("Write not supported by RawScsiBlockDevice")
 
     // --- SCSI command builders ---
 
-    private fun buildRead10(lba: Int, blockCount: Int): ByteArray {
+    private fun buildRead10(
+        lba: Int,
+        blockCount: Int,
+    ): ByteArray {
         val cmd = ByteArray(10)
         cmd[0] = 0x28.toByte() // READ(10)
         cmd[2] = ((lba shr 24) and 0xFF).toByte()
@@ -158,7 +172,12 @@ class RawScsiBlockDevice(
 
     // --- USB Bulk-Only Transport ---
 
-    private fun buildCbw(tag: Int, dataLength: Int, flags: Int, command: ByteArray): ByteArray {
+    private fun buildCbw(
+        tag: Int,
+        dataLength: Int,
+        flags: Int,
+        command: ByteArray,
+    ): ByteArray {
         val cbw = ByteBuffer.allocate(31).order(ByteOrder.LITTLE_ENDIAN)
         cbw.putInt(0x43425355) // dCBWSignature "USBC"
         cbw.putInt(tag)
@@ -207,9 +226,16 @@ class RawScsiBlockDevice(
     private fun resetBulkOnly() {
         // USB Bulk-Only Mass Storage Reset
         try {
-            val result = connection.controlTransfer(
-                0x21, 0xFF, 0, usbInterface.id, null, 0, 2000
-            )
+            val result =
+                connection.controlTransfer(
+                    0x21,
+                    0xFF,
+                    0,
+                    usbInterface.id,
+                    null,
+                    0,
+                    2000,
+                )
             AppLog.d("Bulk-Only Reset result=$result")
         } catch (e: Exception) {
             AppLog.d("Bulk-Only Reset failed: ${e.message}")
@@ -231,7 +257,8 @@ class RawScsiBlockDevice(
                 if (r <= 0) break
                 AppLog.d("Drained $r stale bytes from IN endpoint")
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
 
         // Post-reset delay for device stabilization
         Thread.sleep(200)
@@ -239,7 +266,13 @@ class RawScsiBlockDevice(
 
     private fun clearHaltFeature(endpoint: UsbEndpoint) {
         connection.controlTransfer(
-            0x02, 1, 0, endpoint.address, null, 0, 1000
+            0x02,
+            1,
+            0,
+            endpoint.address,
+            null,
+            0,
+            1000,
         )
     }
 }

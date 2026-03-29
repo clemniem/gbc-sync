@@ -10,8 +10,10 @@ import java.nio.ByteOrder
  * Minimal read-only FAT12/16/32 reader that works directly with libaums BlockDeviceDriver.
  * Handles unsigned bytes correctly and bypasses libaums's SCSI INQUIRY requirement.
  */
-class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBlockOffset: Long = 0) {
-
+class Fat12Reader(
+    private val driver: BlockDeviceDriver,
+    private val partitionBlockOffset: Long = 0,
+) {
     // Boot sector fields (all unsigned)
     val bytesPerSector: Int
     val sectorsPerCluster: Int
@@ -53,11 +55,12 @@ class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBl
         val dataSectors = totalSectors - (reservedSectors + numberOfFats * sectorsPerFat + rootDirSectors)
         val clusterCount = dataSectors / sectorsPerCluster
 
-        fatType = when {
-            clusterCount < 4085 -> "FAT12"
-            clusterCount < 65525 -> "FAT16"
-            else -> "FAT32"
-        }
+        fatType =
+            when {
+                clusterCount < 4085 -> "FAT12"
+                clusterCount < 65525 -> "FAT16"
+                else -> "FAT32"
+            }
 
         // Read filesystem label from boot sector
         val labelOffset = if (fatType == "FAT32") 0x47 else 0x2B
@@ -68,16 +71,25 @@ class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBl
         val bpbHex = bpb.copyOfRange(0, 64).joinToString(" ") { "%02X".format(it) }
         AppLog.d("BPB raw (0-63): $bpbHex")
 
-        AppLog.i("FAT reader: $fatType, label=\"$label\", " +
+        AppLog.i(
+            "FAT reader: $fatType, label=\"$label\", " +
                 "bytesPerSector=$bytesPerSector, sectorsPerCluster=$sectorsPerCluster, " +
-                "clusterSize=$clusterSize, clusters=$clusterCount")
-        AppLog.d("FAT layout: reservedSectors=$reservedSectors, numFATs=$numberOfFats, " +
-                "sectorsPerFat=$sectorsPerFat, rootEntries=$rootEntryCount")
-        AppLog.d("FAT offsets: fatStart=$fatStartByte, rootDirStart=$rootDirStartByte, " +
-                "dataStart=$dataStartByte")
+                "clusterSize=$clusterSize, clusters=$clusterCount",
+        )
+        AppLog.d(
+            "FAT layout: reservedSectors=$reservedSectors, numFATs=$numberOfFats, " +
+                "sectorsPerFat=$sectorsPerFat, rootEntries=$rootEntryCount",
+        )
+        AppLog.d(
+            "FAT offsets: fatStart=$fatStartByte, rootDirStart=$rootDirStartByte, " +
+                "dataStart=$dataStartByte",
+        )
     }
 
-    fun listRootFiles(filter: String, matchesFilter: (String, String) -> Boolean): List<FatFsFile> {
+    fun listRootFiles(
+        filter: String,
+        matchesFilter: (String, String) -> Boolean,
+    ): List<FatFsFile> {
         val result = mutableListOf<FatFsFile>()
 
         val rootDirBytes: ByteArray
@@ -112,21 +124,26 @@ class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBl
             AppLog.d("  entry: \"$name\" ${if (isDir) "[DIR]" else "${fileSize}b"} attr=0x${attr.toString(16)} cluster=$startCluster")
 
             if (!isDir && matchesFilter(name, filter)) {
-                result.add(FatFsFile(
-                    name = name,
-                    relativePath = name,
-                    length = fileSize,
-                    isDirectory = false,
-                    startCluster = startCluster,
-                    reader = this
-                ))
+                result.add(
+                    FatFsFile(
+                        name = name,
+                        relativePath = name,
+                        length = fileSize,
+                        isDirectory = false,
+                        startCluster = startCluster,
+                        reader = this,
+                    ),
+                )
             }
         }
         AppLog.i("Root dir scan: ${result.size} file(s) matched filter \"$filter\"")
         return result
     }
 
-    fun listFilesRecursive(filter: String, matchesFilter: (String, String) -> Boolean): List<FatFsFile> {
+    fun listFilesRecursive(
+        filter: String,
+        matchesFilter: (String, String) -> Boolean,
+    ): List<FatFsFile> {
         val result = mutableListOf<FatFsFile>()
 
         val rootDirBytes: ByteArray
@@ -145,9 +162,12 @@ class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBl
     }
 
     private fun listDirFromBytes(
-        dirBytes: ByteArray, entryCount: Int, pathPrefix: String,
-        filter: String, matchesFilter: (String, String) -> Boolean,
-        result: MutableList<FatFsFile>
+        dirBytes: ByteArray,
+        entryCount: Int,
+        pathPrefix: String,
+        filter: String,
+        matchesFilter: (String, String) -> Boolean,
+        result: MutableList<FatFsFile>,
     ) {
         for (i in 0 until entryCount) {
             val offset = i * 32
@@ -173,14 +193,16 @@ class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBl
                 listDirFromBytes(subDirBytes, subEntryCount, subPath, filter, matchesFilter, result)
             } else if (matchesFilter(name, filter)) {
                 val relativePath = if (pathPrefix.isEmpty()) name else "$pathPrefix/$name"
-                result.add(FatFsFile(
-                    name = name,
-                    relativePath = relativePath,
-                    length = fileSize,
-                    isDirectory = false,
-                    startCluster = startCluster,
-                    reader = this
-                ))
+                result.add(
+                    FatFsFile(
+                        name = name,
+                        relativePath = relativePath,
+                        length = fileSize,
+                        isDirectory = false,
+                        startCluster = startCluster,
+                        reader = this,
+                    ),
+                )
             }
         }
     }
@@ -202,18 +224,18 @@ class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBl
         return result
     }
 
-    fun readFileData(startCluster: Int, fileSize: Long): InputStream {
-        return FatFileInputStream(this, startCluster, fileSize)
-    }
+    fun readFileData(
+        startCluster: Int,
+        fileSize: Long,
+    ): InputStream = FatFileInputStream(this, startCluster, fileSize)
 
-    internal fun getNextCluster(cluster: Int): Int {
-        return when (fatType) {
+    internal fun getNextCluster(cluster: Int): Int =
+        when (fatType) {
             "FAT12" -> getNextClusterFat12(cluster)
             "FAT16" -> getNextClusterFat16(cluster)
             "FAT32" -> getNextClusterFat32(cluster)
             else -> throw UnsupportedOperationException("$fatType not supported by this reader")
         }
-    }
 
     private fun getNextClusterFat12(cluster: Int): Int {
         val fatOffset = cluster + (cluster / 2) // 1.5 bytes per entry
@@ -238,20 +260,20 @@ class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBl
         return (u32(fatBytes, 0) and 0x0FFFFFFF).toInt()
     }
 
-    internal fun isEndOfChain(cluster: Int): Boolean {
-        return when (fatType) {
+    internal fun isEndOfChain(cluster: Int): Boolean =
+        when (fatType) {
             "FAT12" -> cluster >= 0x0FF8
             "FAT16" -> cluster >= 0xFFF8
             "FAT32" -> (cluster and 0x0FFFFFFF) >= 0x0FFFFFF8
             else -> true
         }
-    }
 
-    internal fun clusterToByteOffset(cluster: Int): Long {
-        return dataStartByte + (cluster - 2).toLong() * clusterSize
-    }
+    internal fun clusterToByteOffset(cluster: Int): Long = dataStartByte + (cluster - 2).toLong() * clusterSize
 
-    internal fun readBytes(byteOffset: Long, count: Int): ByteArray {
+    internal fun readBytes(
+        byteOffset: Long,
+        count: Int,
+    ): ByteArray {
         val blockSize = driver.blockSize
         val startBlock = byteOffset / blockSize + partitionBlockOffset
         val offsetInBlock = (byteOffset % blockSize).toInt()
@@ -280,7 +302,10 @@ class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBl
     internal val clusterSizeBytes: Int get() = clusterSize
 
     /** Get start cluster from directory entry. FAT32 uses high 16 bits at offset+20. */
-    private fun getEntryStartCluster(data: ByteArray, offset: Int): Int {
+    private fun getEntryStartCluster(
+        data: ByteArray,
+        offset: Int,
+    ): Int {
         val lo = u16(data, offset + 26)
         return if (fatType == "FAT32") {
             val hi = u16(data, offset + 20)
@@ -290,19 +315,34 @@ class Fat12Reader(private val driver: BlockDeviceDriver, private val partitionBl
         }
     }
 
-    private fun parseDosName(data: ByteArray, offset: Int): String {
+    private fun parseDosName(
+        data: ByteArray,
+        offset: Int,
+    ): String {
         val name = String(data, offset, 8).trim()
         val ext = String(data, offset + 8, 3).trim()
         return if (ext.isEmpty()) name else "$name.$ext"
     }
 
-    private fun u8(data: ByteArray, offset: Int): Int = data[offset].toInt() and 0xFF
-    private fun u16(data: ByteArray, offset: Int): Int {
-        return (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
-    }
-    private fun u32(data: ByteArray, offset: Int): Long {
-        return ByteBuffer.wrap(data, offset, 4).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL
-    }
+    private fun u8(
+        data: ByteArray,
+        offset: Int,
+    ): Int = data[offset].toInt() and 0xFF
+
+    private fun u16(
+        data: ByteArray,
+        offset: Int,
+    ): Int = (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
+
+    private fun u32(
+        data: ByteArray,
+        offset: Int,
+    ): Long =
+        ByteBuffer
+            .wrap(data, offset, 4)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .int
+            .toLong() and 0xFFFFFFFFL
 }
 
 /**
@@ -314,7 +354,7 @@ data class FatFsFile(
     val length: Long,
     val isDirectory: Boolean,
     private val startCluster: Int,
-    private val reader: Fat12Reader
+    private val reader: Fat12Reader,
 ) {
     fun readContents(): InputStream = reader.readFileData(startCluster, length)
 }
@@ -325,9 +365,8 @@ data class FatFsFile(
 private class FatFileInputStream(
     private val reader: Fat12Reader,
     startCluster: Int,
-    private val fileSize: Long
+    private val fileSize: Long,
 ) : InputStream() {
-
     private var currentCluster = startCluster
     private var clusterBuffer: ByteArray? = null
     private var posInCluster = 0
@@ -343,7 +382,11 @@ private class FatFileInputStream(
         return b
     }
 
-    override fun read(b: ByteArray, off: Int, len: Int): Int {
+    override fun read(
+        b: ByteArray,
+        off: Int,
+        len: Int,
+    ): Int {
         if (totalRead >= fileSize) return -1
         var bytesRead = 0
         var remaining = minOf(len.toLong(), fileSize - totalRead).toInt()

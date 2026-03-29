@@ -23,7 +23,7 @@ import me.jahnen.libaums.core.UsbMassStorageDevice
 class UsbDeviceManager(
     private val context: Context,
     private val repository: SyncRepository,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
 ) {
     companion object {
         const val ACTION_USB_PERMISSION = "com.gbcsync.app.USB_PERMISSION"
@@ -62,45 +62,52 @@ class UsbDeviceManager(
 
     // --- USB lifecycle ---
 
-    private val usbReceiver = object : BroadcastReceiver() {
-        override fun onReceive(ctx: Context, intent: Intent) {
-            when (intent.action) {
-                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    AppLog.d("USB device detached")
-                    _connectedDevice.value = null
-                    if (_syncState.value.status != SyncState.Status.DONE) {
-                        _syncState.value = SyncState()
+    private val usbReceiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                ctx: Context,
+                intent: Intent,
+            ) {
+                when (intent.action) {
+                    UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                        AppLog.d("USB device detached")
+                        _connectedDevice.value = null
+                        if (_syncState.value.status != SyncState.Status.DONE) {
+                            _syncState.value = SyncState()
+                        }
                     }
-                }
-                ACTION_USB_PERMISSION -> {
-                    val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                    if (granted) {
-                        AppLog.d("USB permission granted")
-                        scope.launch(Dispatchers.IO) { startSync() }
-                    } else {
-                        AppLog.w("USB permission denied")
-                        _syncState.value = SyncState(
-                            status = SyncState.Status.ERROR,
-                            error = "USB permission denied"
-                        )
+                    ACTION_USB_PERMISSION -> {
+                        val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+                        if (granted) {
+                            AppLog.d("USB permission granted")
+                            scope.launch(Dispatchers.IO) { startSync() }
+                        } else {
+                            AppLog.w("USB permission denied")
+                            _syncState.value =
+                                SyncState(
+                                    status = SyncState.Status.ERROR,
+                                    error = "USB permission denied",
+                                )
+                        }
                     }
                 }
             }
         }
-    }
 
     fun register() {
-        val filter = IntentFilter().apply {
-            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
-            addAction(ACTION_USB_PERMISSION)
-        }
+        val filter =
+            IntentFilter().apply {
+                addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+                addAction(ACTION_USB_PERMISSION)
+            }
         context.registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
     }
 
     fun unregister() {
         try {
             context.unregisterReceiver(usbReceiver)
-        } catch (_: IllegalArgumentException) {}
+        } catch (_: IllegalArgumentException) {
+        }
     }
 
     fun onUsbDeviceAttached() {
@@ -116,9 +123,13 @@ class UsbDeviceManager(
     // --- Detection & routing ---
 
     private fun requestPermission(device: UsbDevice) {
-        val intent = PendingIntent.getBroadcast(
-            context, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_MUTABLE
-        )
+        val intent =
+            PendingIntent.getBroadcast(
+                context,
+                0,
+                Intent(ACTION_USB_PERMISSION),
+                PendingIntent.FLAG_MUTABLE,
+            )
         usbManager.requestPermission(device, intent)
     }
 
@@ -196,10 +207,16 @@ class UsbDeviceManager(
         }
     }
 
-    private fun findMatchingConfig(usbDevice: UsbDevice, configs: List<DeviceConfig>): DeviceConfig? {
+    private fun findMatchingConfig(
+        usbDevice: UsbDevice,
+        configs: List<DeviceConfig>,
+    ): DeviceConfig? {
         for (config in configs) {
-            if (config.vendorId != 0 && config.productId != 0 &&
-                config.vendorId == usbDevice.vendorId && config.productId == usbDevice.productId) {
+            if (config.vendorId != 0 &&
+                config.productId != 0 &&
+                config.vendorId == usbDevice.vendorId &&
+                config.productId == usbDevice.productId
+            ) {
                 return config
             }
         }

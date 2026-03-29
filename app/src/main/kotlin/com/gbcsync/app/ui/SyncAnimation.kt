@@ -32,88 +32,92 @@ private val PALETTE = arrayOf(GB_DARKEST, GB_DARK, GB_LIGHT, GB_LIGHTEST)
 private const val T = 3 // transparent
 
 // GB Camera sprite (18w x 16h) — boxy camera with round lens
-private val CAMERA_SPRITE = arrayOf(
-    intArrayOf(T,T,T,T,T,T,T,1,1,1,1,T,T,T,T,T,T,T),  // viewfinder
-    intArrayOf(T,T,T,T,T,T,T,1,2,2,1,T,T,T,T,T,T,T),
-    intArrayOf(T,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,T),  // top edge
-    intArrayOf(T,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,T),
-    intArrayOf(T,0,1,1,1,1,0,0,0,0,0,0,1,1,1,1,0,T),  // lens area
-    intArrayOf(T,0,1,1,1,0,0,2,2,2,2,0,0,1,1,1,0,T),
-    intArrayOf(T,0,1,1,1,0,2,3,3,2,2,2,0,1,1,1,0,T),
-    intArrayOf(T,0,1,1,1,0,2,3,2,2,2,2,0,1,1,1,0,T),
-    intArrayOf(T,0,1,1,1,0,2,2,2,2,2,2,0,1,1,1,0,T),
-    intArrayOf(T,0,1,1,1,0,0,2,2,2,2,0,0,1,1,1,0,T),
-    intArrayOf(T,0,1,1,1,1,0,0,0,0,0,0,1,1,1,1,0,T),
-    intArrayOf(T,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,T),
-    intArrayOf(T,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,T),  // bottom edge
-    intArrayOf(T,T,T,T,0,1,0,T,T,T,T,0,1,0,T,T,T,T),  // legs/stand
-    intArrayOf(T,T,T,T,0,1,0,T,T,T,T,0,1,0,T,T,T,T),
-    intArrayOf(T,T,T,0,0,0,0,T,T,T,T,0,0,0,0,T,T,T),
-)
+private val CAMERA_SPRITE =
+    arrayOf(
+        intArrayOf(T, T, T, T, T, T, T, 1, 1, 1, 1, T, T, T, T, T, T, T), // viewfinder
+        intArrayOf(T, T, T, T, T, T, T, 1, 2, 2, 1, T, T, T, T, T, T, T),
+        intArrayOf(T, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, T), // top edge
+        intArrayOf(T, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, T),
+        intArrayOf(T, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, T), // lens area
+        intArrayOf(T, 0, 1, 1, 1, 0, 0, 2, 2, 2, 2, 0, 0, 1, 1, 1, 0, T),
+        intArrayOf(T, 0, 1, 1, 1, 0, 2, 3, 3, 2, 2, 2, 0, 1, 1, 1, 0, T),
+        intArrayOf(T, 0, 1, 1, 1, 0, 2, 3, 2, 2, 2, 2, 0, 1, 1, 1, 0, T),
+        intArrayOf(T, 0, 1, 1, 1, 0, 2, 2, 2, 2, 2, 2, 0, 1, 1, 1, 0, T),
+        intArrayOf(T, 0, 1, 1, 1, 0, 0, 2, 2, 2, 2, 0, 0, 1, 1, 1, 0, T),
+        intArrayOf(T, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, T),
+        intArrayOf(T, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, T),
+        intArrayOf(T, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, T), // bottom edge
+        intArrayOf(T, T, T, T, 0, 1, 0, T, T, T, T, 0, 1, 0, T, T, T, T), // legs/stand
+        intArrayOf(T, T, T, T, 0, 1, 0, T, T, T, T, 0, 1, 0, T, T, T, T),
+        intArrayOf(T, T, T, 0, 0, 0, 0, T, T, T, T, 0, 0, 0, 0, T, T, T),
+    )
 
 // Phone sprite (10w x 18h) — tall smartphone
-private val PHONE_SPRITE = arrayOf(
-    intArrayOf(T,0,0,0,0,0,0,0,0,T),  // top rounded
-    intArrayOf(0,0,1,1,1,1,1,1,0,0),
-    intArrayOf(0,1,1,0,0,0,0,1,1,0),  // speaker slit
-    intArrayOf(0,1,2,2,2,2,2,2,1,0),  // screen starts
-    intArrayOf(0,1,2,3,3,3,3,2,1,0),
-    intArrayOf(0,1,2,3,2,2,3,2,1,0),
-    intArrayOf(0,1,2,3,2,3,3,2,1,0),
-    intArrayOf(0,1,2,3,3,3,2,2,1,0),
-    intArrayOf(0,1,2,2,3,2,3,2,1,0),
-    intArrayOf(0,1,2,3,2,2,3,2,1,0),
-    intArrayOf(0,1,2,3,3,3,3,2,1,0),
-    intArrayOf(0,1,2,2,2,2,2,2,1,0),  // screen ends
-    intArrayOf(0,1,1,1,1,1,1,1,1,0),
-    intArrayOf(0,1,1,1,1,1,1,1,1,0),
-    intArrayOf(0,1,1,0,0,0,0,1,1,0),  // home button area
-    intArrayOf(0,1,1,0,2,2,0,1,1,0),
-    intArrayOf(0,1,1,0,0,0,0,1,1,0),
-    intArrayOf(0,0,0,0,0,0,0,0,0,0),  // bottom
-)
+private val PHONE_SPRITE =
+    arrayOf(
+        intArrayOf(T, 0, 0, 0, 0, 0, 0, 0, 0, T), // top rounded
+        intArrayOf(0, 0, 1, 1, 1, 1, 1, 1, 0, 0),
+        intArrayOf(0, 1, 1, 0, 0, 0, 0, 1, 1, 0), // speaker slit
+        intArrayOf(0, 1, 2, 2, 2, 2, 2, 2, 1, 0), // screen starts
+        intArrayOf(0, 1, 2, 3, 3, 3, 3, 2, 1, 0),
+        intArrayOf(0, 1, 2, 3, 2, 2, 3, 2, 1, 0),
+        intArrayOf(0, 1, 2, 3, 2, 3, 3, 2, 1, 0),
+        intArrayOf(0, 1, 2, 3, 3, 3, 2, 2, 1, 0),
+        intArrayOf(0, 1, 2, 2, 3, 2, 3, 2, 1, 0),
+        intArrayOf(0, 1, 2, 3, 2, 2, 3, 2, 1, 0),
+        intArrayOf(0, 1, 2, 3, 3, 3, 3, 2, 1, 0),
+        intArrayOf(0, 1, 2, 2, 2, 2, 2, 2, 1, 0), // screen ends
+        intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 0),
+        intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 0),
+        intArrayOf(0, 1, 1, 0, 0, 0, 0, 1, 1, 0), // home button area
+        intArrayOf(0, 1, 1, 0, 2, 2, 0, 1, 1, 0),
+        intArrayOf(0, 1, 1, 0, 0, 0, 0, 1, 1, 0),
+        intArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // bottom
+    )
 
 // Walking figure frame 1 — left leg forward (10w x 14h)
-private val WALK_FRAME_1 = arrayOf(
-    intArrayOf(T,T,T,0,0,0,0,T,T,T),  // head
-    intArrayOf(T,T,0,0,1,1,0,0,T,T),
-    intArrayOf(T,T,0,1,0,0,1,0,T,T),
-    intArrayOf(T,T,T,0,0,0,0,T,T,T),
-    intArrayOf(T,T,T,T,0,0,T,T,T,T),  // neck
-    intArrayOf(T,T,0,0,0,0,0,0,T,T),  // torso
-    intArrayOf(T,0,1,0,0,0,0,1,0,T),  // arms out
-    intArrayOf(T,T,T,0,0,0,0,T,T,T),
-    intArrayOf(T,T,T,0,1,1,0,T,T,T),
-    intArrayOf(T,T,T,0,T,T,0,T,T,T),  // legs split
-    intArrayOf(T,T,0,T,T,T,T,0,T,T),
-    intArrayOf(T,0,T,T,T,T,T,T,0,T),
-    intArrayOf(T,0,0,T,T,T,T,0,0,T),  // feet
-    intArrayOf(0,0,0,T,T,T,T,0,0,0),
-)
+private val WALK_FRAME_1 =
+    arrayOf(
+        intArrayOf(T, T, T, 0, 0, 0, 0, T, T, T), // head
+        intArrayOf(T, T, 0, 0, 1, 1, 0, 0, T, T),
+        intArrayOf(T, T, 0, 1, 0, 0, 1, 0, T, T),
+        intArrayOf(T, T, T, 0, 0, 0, 0, T, T, T),
+        intArrayOf(T, T, T, T, 0, 0, T, T, T, T), // neck
+        intArrayOf(T, T, 0, 0, 0, 0, 0, 0, T, T), // torso
+        intArrayOf(T, 0, 1, 0, 0, 0, 0, 1, 0, T), // arms out
+        intArrayOf(T, T, T, 0, 0, 0, 0, T, T, T),
+        intArrayOf(T, T, T, 0, 1, 1, 0, T, T, T),
+        intArrayOf(T, T, T, 0, T, T, 0, T, T, T), // legs split
+        intArrayOf(T, T, 0, T, T, T, T, 0, T, T),
+        intArrayOf(T, 0, T, T, T, T, T, T, 0, T),
+        intArrayOf(T, 0, 0, T, T, T, T, 0, 0, T), // feet
+        intArrayOf(0, 0, 0, T, T, T, T, 0, 0, 0),
+    )
 
 // Walking figure frame 2 — right leg forward (10w x 14h)
-private val WALK_FRAME_2 = arrayOf(
-    intArrayOf(T,T,T,0,0,0,0,T,T,T),  // head
-    intArrayOf(T,T,0,0,1,1,0,0,T,T),
-    intArrayOf(T,T,0,1,0,0,1,0,T,T),
-    intArrayOf(T,T,T,0,0,0,0,T,T,T),
-    intArrayOf(T,T,T,T,0,0,T,T,T,T),  // neck
-    intArrayOf(T,T,0,0,0,0,0,0,T,T),  // torso
-    intArrayOf(T,T,T,0,0,0,0,T,T,T),  // arms at sides
-    intArrayOf(T,0,T,0,0,0,0,T,0,T),  // arms swing opposite
-    intArrayOf(T,T,T,0,1,1,0,T,T,T),
-    intArrayOf(T,T,T,T,0,0,T,T,T,T),  // legs together
-    intArrayOf(T,T,T,0,T,T,0,T,T,T),
-    intArrayOf(T,T,0,T,T,T,T,0,T,T),
-    intArrayOf(T,0,0,T,T,T,0,0,T,T),  // feet
-    intArrayOf(0,0,0,T,T,T,0,0,0,T),
-)
+private val WALK_FRAME_2 =
+    arrayOf(
+        intArrayOf(T, T, T, 0, 0, 0, 0, T, T, T), // head
+        intArrayOf(T, T, 0, 0, 1, 1, 0, 0, T, T),
+        intArrayOf(T, T, 0, 1, 0, 0, 1, 0, T, T),
+        intArrayOf(T, T, T, 0, 0, 0, 0, T, T, T),
+        intArrayOf(T, T, T, T, 0, 0, T, T, T, T), // neck
+        intArrayOf(T, T, 0, 0, 0, 0, 0, 0, T, T), // torso
+        intArrayOf(T, T, T, 0, 0, 0, 0, T, T, T), // arms at sides
+        intArrayOf(T, 0, T, 0, 0, 0, 0, T, 0, T), // arms swing opposite
+        intArrayOf(T, T, T, 0, 1, 1, 0, T, T, T),
+        intArrayOf(T, T, T, T, 0, 0, T, T, T, T), // legs together
+        intArrayOf(T, T, T, 0, T, T, 0, T, T, T),
+        intArrayOf(T, T, 0, T, T, T, T, 0, T, T),
+        intArrayOf(T, 0, 0, T, T, T, 0, 0, T, T), // feet
+        intArrayOf(0, 0, 0, T, T, T, 0, 0, 0, T),
+    )
 
 @Composable
 fun SyncAnimation(
     progress: Float,
     isConnecting: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "walk")
 
@@ -121,38 +125,41 @@ fun SyncAnimation(
     val walkCycle by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "walkCycle"
+        animationSpec =
+            infiniteRepeatable(
+                animation = tween(600, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+        label = "walkCycle",
     )
 
     // Connecting: pace near the camera
     val connectingOffset by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 0.12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "connecting"
+        animationSpec =
+            infiniteRepeatable(
+                animation = tween(2000, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+        label = "connecting",
     )
 
     // Smooth the progress jumps
     val smoothProgress by animateFloatAsState(
         targetValue = progress,
         animationSpec = tween(500, easing = LinearEasing),
-        label = "progress"
+        label = "progress",
     )
 
     val figureProgress = if (isConnecting) connectingOffset else smoothProgress
     val walkFrame = if (walkCycle < 0.5f) WALK_FRAME_1 else WALK_FRAME_2
 
     Canvas(
-        modifier = modifier
-            .fillMaxWidth()
-            .aspectRatio(2.5f)
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .aspectRatio(2.5f),
     ) {
         val px = size.width / 120f // pixel size: scene is 120 "pixels" wide
         val sceneHeight = (size.width / 2.5f)
@@ -165,7 +172,7 @@ fun SyncAnimation(
         drawRect(
             color = GB_DARKEST,
             topLeft = Offset(0f, groundY),
-            size = Size(size.width, px * 1f)
+            size = Size(size.width, px * 1f),
         )
 
         // Dither pattern on ground
@@ -174,7 +181,7 @@ fun SyncAnimation(
                 drawRect(
                     color = GB_LIGHT,
                     topLeft = Offset(x * px, groundY + px),
-                    size = Size(px, px)
+                    size = Size(px, px),
                 )
             }
         }
@@ -202,7 +209,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSprite(
     sprite: Array<IntArray>,
     offsetX: Float,
     offsetY: Float,
-    pixelSize: Float
+    pixelSize: Float,
 ) {
     for (row in sprite.indices) {
         for (col in sprite[row].indices) {
@@ -211,7 +218,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSprite(
             drawRect(
                 color = PALETTE[colorIdx],
                 topLeft = Offset((offsetX + col) * pixelSize, (offsetY + row) * pixelSize),
-                size = Size(pixelSize, pixelSize)
+                size = Size(pixelSize, pixelSize),
             )
         }
     }
@@ -224,7 +231,7 @@ private fun SyncAnimationSyncingPreview() {
         SyncAnimation(
             progress = 0.4f,
             isConnecting = false,
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(16.dp),
         )
     }
 }
@@ -236,7 +243,7 @@ private fun SyncAnimationConnectingPreview() {
         SyncAnimation(
             progress = 0f,
             isConnecting = true,
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(16.dp),
         )
     }
 }
@@ -248,7 +255,7 @@ private fun SyncAnimationDonePreview() {
         SyncAnimation(
             progress = 1f,
             isConnecting = false,
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(16.dp),
         )
     }
 }

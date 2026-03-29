@@ -25,7 +25,6 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-
     private lateinit var repository: SyncRepository
     private lateinit var usbManager: UsbDeviceManager
 
@@ -72,20 +71,24 @@ class MainActivity : ComponentActivity() {
                                 onRetrySync = { usbManager.retrySync() },
                                 onNavigateToSettings = { navController.navigate("settings") },
                                 onOpenGbPrinterWeb = {
-                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://herrzatacke.github.io/gb-printer-web/#/import")))
+                                    startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse("https://herrzatacke.github.io/gb-printer-web/#/import")),
+                                    )
                                 },
                                 onOpenFolder = { path ->
                                     try {
-                                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                                            setDataAndType(Uri.parse(path), "resource/folder")
-                                        }
+                                        val intent =
+                                            Intent(Intent.ACTION_VIEW).apply {
+                                                setDataAndType(Uri.parse(path), "resource/folder")
+                                            }
                                         startActivity(intent)
                                     } catch (_: Exception) {
                                         // Fallback: open generic file browser
                                         try {
-                                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                                setDataAndType(Uri.parse("content://$path"), "vnd.android.document/directory")
-                                            }
+                                            val intent =
+                                                Intent(Intent.ACTION_VIEW).apply {
+                                                    setDataAndType(Uri.parse("content://$path"), "vnd.android.document/directory")
+                                                }
                                             startActivity(intent)
                                         } catch (_: Exception) {
                                             AppLog.w("No file manager found to open folder")
@@ -94,7 +97,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onContinueImport = { usbManager.onContinueImport() },
                                 onNewImport = { usbManager.onNewImport() },
-                                onCameraChosen = { usbManager.onCameraChosen(it) }
+                                onCameraChosen = { usbManager.onCameraChosen(it) },
                             )
                         }
                         composable("settings") {
@@ -123,7 +126,7 @@ class MainActivity : ComponentActivity() {
                                         repository.setDebugLogEnabled(enabled)
                                     }
                                 },
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateBack = { navController.popBackStack() },
                             )
                         }
                     }

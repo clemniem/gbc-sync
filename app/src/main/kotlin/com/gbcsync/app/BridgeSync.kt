@@ -19,7 +19,7 @@ class BridgeSync(
     private val repository: SyncRepository,
     private val fileCopier: FileCopier,
     private val syncState: MutableStateFlow<SyncState>,
-    private val requestPermission: (UsbDevice) -> Unit
+    private val requestPermission: (UsbDevice) -> Unit,
 ) {
     companion object {
         const val VENDOR_ID = 9114
@@ -41,14 +41,15 @@ class BridgeSync(
         storageDevice: UsbMassStorageDevice,
         config: DeviceConfig,
         destDir: File,
-        deviceName: String
+        deviceName: String,
     ) {
         // Step 0: Quick scan to list device files for prefix matching
-        syncState.value = SyncState(
-            status = SyncState.Status.CONNECTING,
-            deviceName = deviceName,
-            currentFile = "Scanning device files..."
-        )
+        syncState.value =
+            SyncState(
+                status = SyncState.Status.CONNECTING,
+                deviceName = deviceName,
+                currentFile = "Scanning device files...",
+            )
 
         val deviceFileIndex = mutableListOf<Triple<String, Long, UsbFile>>()
         try {
@@ -82,25 +83,28 @@ class BridgeSync(
 
             if (newOnDevice == 0) {
                 AppLog.i("[Bridge] All ${deviceFileIndex.size} files already in ${matchingFolder.name}, nothing to copy")
-                syncState.value = SyncState(
-                    status = SyncState.Status.DONE,
-                    deviceName = deviceName,
-                    targetFolder = matchingFolder.absolutePath,
-                    safeToDisconnect = true
-                )
+                syncState.value =
+                    SyncState(
+                        status = SyncState.Status.DONE,
+                        deviceName = deviceName,
+                        targetFolder = matchingFolder.absolutePath,
+                        safeToDisconnect = true,
+                    )
                 return
             }
 
             AppLog.i("[Bridge] Found matching folder: ${matchingFolder.name} (${existingFiles.size} existing, $newOnDevice new)")
             importChoiceDeferred = CompletableDeferred()
-            syncState.value = syncState.value.copy(
-                importChoice = ImportChoice(
-                    message = "${existingFiles.size} files already in \"${matchingFolder.name}\", $newOnDevice new to copy",
-                    appendLabel = "Append",
-                    newLabel = "Start New",
-                    autoAppendSeconds = 10
+            syncState.value =
+                syncState.value.copy(
+                    importChoice =
+                        ImportChoice(
+                            message = "${existingFiles.size} files already in \"${matchingFolder.name}\", $newOnDevice new to copy",
+                            appendLabel = "Append",
+                            newLabel = "Start New",
+                            autoAppendSeconds = 10,
+                        ),
                 )
-            )
             val append = importChoiceDeferred!!.await()
             if (append) {
                 importDir = matchingFolder
@@ -129,20 +133,22 @@ class BridgeSync(
 
         for (round in 1..20) {
             val waitMs = if (round == 1) BOOT_DELAY_MS else RECONNECT_DELAY_MS
-            syncState.value = SyncState(
-                status = SyncState.Status.CONNECTING,
-                deviceName = deviceName,
-                currentFile = if (round == 1) "Waiting for Bridge to boot..." else "Reconnecting... (round $round)"
-            )
+            syncState.value =
+                SyncState(
+                    status = SyncState.Status.CONNECTING,
+                    deviceName = deviceName,
+                    currentFile = if (round == 1) "Waiting for Bridge to boot..." else "Reconnecting... (round $round)",
+                )
             AppLog.i("[Bridge] Round $round: waiting ${waitMs}ms...")
             delay(waitMs)
 
             try {
                 if (round > 1) {
                     val devices = UsbMassStorageDevice.getMassStorageDevices(context)
-                    val found = devices.firstOrNull { d ->
-                        d.usbDevice.vendorId == VENDOR_ID && d.usbDevice.productId == PRODUCT_ID
-                    }
+                    val found =
+                        devices.firstOrNull { d ->
+                            d.usbDevice.vendorId == VENDOR_ID && d.usbDevice.productId == PRODUCT_ID
+                        }
                     if (found == null) {
                         AppLog.e("[Bridge] Bridge not found on reconnect")
                         break
@@ -184,10 +190,11 @@ class BridgeSync(
             val allFiles = mutableListOf<Pair<UsbFile, String>>()
             fileCopier.collectLibaumsFiles(fs.rootDirectory, "", config.fileFilter, config.recursive, allFiles)
 
-            val newFiles = allFiles.filter { (_, relativePath) ->
-                val fileName = if (relativePath.isNotEmpty()) relativePath else return@filter true
-                !copiedFiles.contains(fileName)
-            }
+            val newFiles =
+                allFiles.filter { (_, relativePath) ->
+                    val fileName = if (relativePath.isNotEmpty()) relativePath else return@filter true
+                    !copiedFiles.contains(fileName)
+                }
 
             if (round == 1) {
                 totalFiles = newFiles.size + copiedFiles.size
@@ -200,12 +207,13 @@ class BridgeSync(
                 break
             }
 
-            syncState.value = SyncState(
-                status = SyncState.Status.SYNCING,
-                deviceName = deviceName,
-                filesCopied = copiedFiles.size,
-                totalFiles = totalFiles
-            )
+            syncState.value =
+                SyncState(
+                    status = SyncState.Status.SYNCING,
+                    deviceName = deviceName,
+                    filesCopied = copiedFiles.size,
+                    totalFiles = totalFiles,
+                )
 
             val chunkSize = fs.chunkSize
             var errorInRound = false
@@ -237,7 +245,10 @@ class BridgeSync(
                     delay(FILE_DELAY_MS)
                 } catch (e: Exception) {
                     AppLog.w("[Bridge] Error copying $targetPath: ${e.message}")
-                    try { File(importDir, targetPath).delete() } catch (_: Exception) {}
+                    try {
+                        File(importDir, targetPath).delete()
+                    } catch (_: Exception) {
+                    }
                     errorInRound = true
                     break
                 }
@@ -250,7 +261,9 @@ class BridgeSync(
                 break
             }
 
-            AppLog.i("[Bridge] Round $round: $copiedThisRound copied this round, ${copiedFiles.size}/$totalFiles total, delay=${FILE_DELAY_MS}ms, reconnecting...")
+            AppLog.i(
+                "[Bridge] Round $round: $copiedThisRound copied this round, ${copiedFiles.size}/$totalFiles total, delay=${FILE_DELAY_MS}ms, reconnecting...",
+            )
         }
 
         val remaining = totalFiles - copiedFiles.size
@@ -265,30 +278,35 @@ class BridgeSync(
 
     private fun findMatchingImportFolder(
         destDir: File,
-        deviceFileIndex: List<Triple<String, Long, UsbFile>>
+        deviceFileIndex: List<Triple<String, Long, UsbFile>>,
     ): File? {
         if (deviceFileIndex.isEmpty()) return null
 
         val devicePaths = deviceFileIndex.map { it.first }.sorted()
 
-        val syncFolders = destDir.listFiles()
-            ?.filter { it.isDirectory && it.name.matches(SYNC_FOLDER_REGEX) }
-            ?.sortedByDescending { it.name }
-            ?: return null
+        val syncFolders =
+            destDir
+                .listFiles()
+                ?.filter { it.isDirectory && it.name.matches(SYNC_FOLDER_REGEX) }
+                ?.sortedByDescending { it.name }
+                ?: return null
 
         for (folder in syncFolders) {
-            val folderPaths = folder.walkTopDown()
-                .filter { it.isFile && !it.name.endsWith(".tmp") }
-                .map { it.relativeTo(folder).path }
-                .sorted()
-                .toList()
+            val folderPaths =
+                folder
+                    .walkTopDown()
+                    .filter { it.isFile && !it.name.endsWith(".tmp") }
+                    .map { it.relativeTo(folder).path }
+                    .sorted()
+                    .toList()
 
             if (folderPaths.isEmpty()) continue
             if (folderPaths.size > devicePaths.size) continue
 
-            val isPrefix = folderPaths.indices.all { i ->
-                folderPaths[i] == devicePaths[i]
-            }
+            val isPrefix =
+                folderPaths.indices.all { i ->
+                    folderPaths[i] == devicePaths[i]
+                }
 
             if (isPrefix) return folder
         }
@@ -296,10 +314,14 @@ class BridgeSync(
     }
 
     private fun createImportFolder(destDir: File): File {
-        val nextNumber = (destDir.listFiles()
-            ?.filter { it.isDirectory && it.name.matches(SYNC_FOLDER_REGEX) }
-            ?.mapNotNull { it.name.removePrefix("sync-").toIntOrNull() }
-            ?.maxOrNull() ?: 0) + 1
+        val nextNumber =
+            (
+                destDir
+                    .listFiles()
+                    ?.filter { it.isDirectory && it.name.matches(SYNC_FOLDER_REGEX) }
+                    ?.mapNotNull { it.name.removePrefix("sync-").toIntOrNull() }
+                    ?.maxOrNull() ?: 0
+            ) + 1
         val dir = File(destDir, "sync-%03d".format(nextNumber))
         dir.mkdirs()
         AppLog.i("[Bridge] New import folder: ${dir.name}")

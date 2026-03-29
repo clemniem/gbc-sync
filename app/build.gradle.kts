@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ktlint)
 }
 
 android {
@@ -58,4 +59,11 @@ dependencies {
 
 
     debugImplementation(libs.androidx.ui.tooling)
+}
+
+ktlint {
+    version.set("1.5.0")
+    filter {
+        exclude("*.kts")
+    }
 }

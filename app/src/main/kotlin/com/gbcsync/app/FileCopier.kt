@@ -39,6 +39,17 @@ class FileCopier(private val repository: SyncRepository) {
         }
     }
 
+    /** Read a small USB file entirely into memory (for hash comparison of .sav files). */
+    fun readUsbFileContent(usbFile: UsbFile, fs: FileSystem): ByteArray {
+        val inputStream = UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
+        return inputStream.use { it.readBytes() }
+    }
+
+    /** Read a small FatFsFile entirely into memory (for hash comparison of .sav files). */
+    fun readFatFileContent(file: FatFsFile): ByteArray {
+        return file.readContents().use { it.readBytes() }
+    }
+
     /**
      * Builds the target path for a synced file.
      * Pattern: <infix>/<datetime>-<infix>.<ext>

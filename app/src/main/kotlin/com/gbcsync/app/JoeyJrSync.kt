@@ -110,8 +110,18 @@ class JoeyJrSync(
 
             val newFiles = filesToCopy.filter { (usbFile, relativePath) ->
                 val fileName = if (relativePath.isNotEmpty()) relativePath else usbFile.name
-                if (fileName.lowercase().endsWith(".sav")) true
-                else repository.shouldCopyFile(fileName, usbFile.length, destDir)
+                if (fileName.lowercase().endsWith(".sav")) {
+                    try {
+                        val content = fileCopier.readUsbFileContent(usbFile, fs)
+                        val targetPath = fileCopier.formatTargetPath(fileName, camera?.filePrefix)
+                        repository.shouldCopySavFile(targetPath, content, destDir)
+                    } catch (e: Exception) {
+                        AppLog.w("Hash check failed for $fileName, will copy: ${e.message}")
+                        true
+                    }
+                } else {
+                    repository.shouldCopyFile(fileName, usbFile.length, destDir)
+                }
             }
             AppLog.i("${newFiles.size} new file(s) to copy (${filesToCopy.size - newFiles.size} already synced)")
 
@@ -179,8 +189,18 @@ class JoeyJrSync(
         AppLog.d("Found ${allFiles.size} matching file(s) on device")
 
         val newFiles = allFiles.filter { file ->
-            if (file.name.lowercase().endsWith(".sav")) true
-            else repository.shouldCopyFile(file.relativePath, file.length, destDir)
+            if (file.name.lowercase().endsWith(".sav")) {
+                try {
+                    val content = fileCopier.readFatFileContent(file)
+                    val targetPath = fileCopier.formatTargetPath(file.relativePath, camera?.filePrefix)
+                    repository.shouldCopySavFile(targetPath, content, destDir)
+                } catch (e: Exception) {
+                    AppLog.w("Hash check failed for ${file.name}, will copy: ${e.message}")
+                    true
+                }
+            } else {
+                repository.shouldCopyFile(file.relativePath, file.length, destDir)
+            }
         }
         AppLog.i("${newFiles.size} new file(s) to copy (${allFiles.size - newFiles.size} already synced)")
 

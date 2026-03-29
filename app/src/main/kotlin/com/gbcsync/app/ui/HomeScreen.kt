@@ -51,6 +51,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.RadioButton
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import com.gbcsync.app.SyncState
 import com.gbcsync.app.data.CameraType
@@ -100,30 +102,78 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Connection Status
-            ConnectionStatusCard(
-                connectedDevice, syncState,
-                onRetry = onRetrySync,
-                onOpenGbPrinterWeb = onOpenGbPrinterWeb,
-                onOpenFolder = onOpenFolder,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
+            val isSyncActive = syncState.status == SyncState.Status.SYNCING ||
+                    syncState.status == SyncState.Status.CONNECTING
 
-            // Tabs
-            if (debugLogEnabled) {
-                TabRow(selectedTabIndex = selectedTab) {
-                    Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
-                        Text("History", modifier = Modifier.padding(12.dp))
-                    }
-                    Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
-                        Text("Live Log", modifier = Modifier.padding(12.dp))
+            if (isSyncActive) {
+                // Expanded sync animation view
+                Spacer(modifier = Modifier.weight(1f))
+                SyncAnimation(
+                    progress = syncState.progress,
+                    isConnecting = syncState.status == SyncState.Status.CONNECTING,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = when (syncState.status) {
+                        SyncState.Status.CONNECTING -> "Connecting to ${syncState.deviceName}..."
+                        SyncState.Status.SYNCING -> "Syncing from ${syncState.deviceName}..."
+                        else -> ""
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (syncState.status == SyncState.Status.SYNCING && syncState.totalFiles > 0) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "${syncState.filesCopied} / ${syncState.totalFiles}",
+                        style = MaterialTheme.typography.titleLarge,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                if (syncState.currentFile.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = syncState.currentFile,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 32.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+            } else {
+                // Normal view: status card + tabs
+                ConnectionStatusCard(
+                    connectedDevice, syncState,
+                    onRetry = onRetrySync,
+                    onOpenGbPrinterWeb = onOpenGbPrinterWeb,
+                    onOpenFolder = onOpenFolder,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+
+                if (debugLogEnabled) {
+                    TabRow(selectedTabIndex = selectedTab) {
+                        Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
+                            Text("History", modifier = Modifier.padding(12.dp))
+                        }
+                        Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
+                            Text("Live Log", modifier = Modifier.padding(12.dp))
+                        }
                     }
                 }
-            }
 
-            when (selectedTab) {
-                0 -> SyncHistoryTab(syncLog)
-                1 -> if (debugLogEnabled) LiveLogTab(logLines)
+                when (selectedTab) {
+                    0 -> SyncHistoryTab(syncLog)
+                    1 -> if (debugLogEnabled) LiveLogTab(logLines)
+                }
             }
         }
     }

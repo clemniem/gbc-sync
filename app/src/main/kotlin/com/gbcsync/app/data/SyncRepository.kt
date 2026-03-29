@@ -157,7 +157,7 @@ class SyncRepository(private val context: Context) {
     // --- Debug Logging ---
 
     val debugLogEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[DEBUG_LOG_KEY] ?: true // enabled by default
+        prefs[DEBUG_LOG_KEY] ?: false
     }
 
     suspend fun setDebugLogEnabled(enabled: Boolean) {
@@ -207,6 +207,24 @@ class SyncRepository(private val context: Context) {
         if (!destFile.exists()) return true
         // Skip if same name and size (already synced)
         return destFile.length() != fileSize
+    }
+
+    /**
+     * Check if a .sav file needs copying by comparing MD5 of local file against device content.
+     * Returns true if the file should be copied (doesn't exist locally or content differs).
+     */
+    fun shouldCopySavFile(fileName: String, deviceContent: ByteArray, destDir: File): Boolean {
+        val destFile = File(destDir, fileName)
+        if (!destFile.exists()) return true
+        if (destFile.length() != deviceContent.size.toLong()) return true
+        val localHash = md5(destFile.readBytes())
+        val deviceHash = md5(deviceContent)
+        return localHash != deviceHash
+    }
+
+    private fun md5(data: ByteArray): String {
+        val digest = java.security.MessageDigest.getInstance("MD5")
+        return digest.digest(data).joinToString("") { "%02x".format(it) }
     }
 
     private val filterRegexCache = ConcurrentHashMap<String, Regex>()

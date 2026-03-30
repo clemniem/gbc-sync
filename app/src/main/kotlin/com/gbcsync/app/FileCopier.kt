@@ -40,13 +40,16 @@ class FileCopier(
         }
     }
 
-    /** Read a small USB file entirely into memory (for hash comparison of .sav files). */
+    /**
+     * Read a small USB file entirely into memory (for hash comparison of .sav files).
+     * Does NOT close the stream to avoid FatFile.flush() triggering SCSI WRITE commands.
+     */
     fun readUsbFileContent(
         usbFile: UsbFile,
         fs: FileSystem,
     ): ByteArray {
         val inputStream = UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
-        return inputStream.use { it.readBytes() }
+        return inputStream.readBytes()
     }
 
     /** Read a small FatFsFile entirely into memory (for hash comparison of .sav files). */
@@ -72,8 +75,9 @@ class FileCopier(
 
     /**
      * @param skipClose If true, skips closing the libaums input stream to avoid
-     *   FatFile.flush() sending SCSI WRITE commands that corrupt RP2040 USB state.
-     *   Only needed for Bridge; JoeyJr can close normally.
+     *   FatFile.flush() sending SCSI WRITE commands back to the device.
+     *   Must be true for both Bridge (corrupts RP2040 USB state) and JoeyJr
+     *   (corrupts ROM data on MiniCam PhotoRom carts).
      */
     fun copyLibaumsFile(
         usbFile: UsbFile,

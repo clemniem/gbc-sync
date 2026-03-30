@@ -152,7 +152,7 @@ class JoeyJrSync(
 
                 try {
                     AppLog.d("Copying $targetPath (${usbFile.length} bytes)...")
-                    fileCopier.copyLibaumsFile(usbFile, destDir, targetPath, chunkSize, fs)
+                    fileCopier.copyLibaumsFile(usbFile, destDir, targetPath, chunkSize, fs, skipClose = true)
                     copied++
                     AppLog.d("Copied $targetPath OK")
                     syncState.value = syncState.value.copy(filesCopied = copied)

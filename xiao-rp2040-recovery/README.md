@@ -28,8 +28,8 @@ arduino-cli core install rp2040:rp2040 \
 ls /dev/tty.usbmodem*
 
 # Compile and upload (replace the port with yours)
-arduino-cli compile --fqbn rp2040:rp2040:seeed_xiao_rp2040 enter_bootloader.ino
-arduino-cli upload --fqbn rp2040:rp2040:seeed_xiao_rp2040 -p /dev/tty.usbmodemXXXX enter_bootloader.ino
+arduino-cli compile --fqbn rp2040:rp2040:seeed_xiao_rp2040 .
+arduino-cli upload --fqbn rp2040:rp2040:seeed_xiao_rp2040 -p /dev/tty.usbmodemXXXX .
 ```
 
 ## Enter bootloader mode

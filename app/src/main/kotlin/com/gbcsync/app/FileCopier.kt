@@ -74,10 +74,10 @@ class FileCopier(
     }
 
     /**
-     * @param skipClose If true, skips closing the libaums input stream to avoid
-     *   FatFile.flush() sending SCSI WRITE commands back to the device.
-     *   Must be true for both Bridge (corrupts RP2040 USB state) and JoeyJr
-     *   (corrupts ROM data on MiniCam PhotoRom carts).
+     * Copies a file from a libaums USB filesystem to local storage.
+     * Never closes the libaums input stream — closing triggers FatFile.flush()
+     * which sends SCSI WRITE commands that corrupt both RP2040 (Bridge) and
+     * MiniCam PhotoRom carts (JoeyJr).
      */
     fun copyLibaumsFile(
         usbFile: UsbFile,
@@ -85,7 +85,6 @@ class FileCopier(
         relativePath: String,
         chunkSize: Int,
         fs: FileSystem,
-        skipClose: Boolean = false,
     ) {
         val destFile = File(destDir, relativePath)
         destFile.parentFile?.mkdirs()
@@ -95,13 +94,9 @@ class FileCopier(
             fos.channel.truncate(0)
             val buffer = ByteArray(chunkSize)
             val inputStream = UsbFileStreamFactory.createBufferedInputStream(usbFile, fs)
-            try {
-                var bytesRead: Int
-                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    fos.write(buffer, 0, bytesRead)
-                }
-            } finally {
-                if (!skipClose) inputStream.close()
+            var bytesRead: Int
+            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                fos.write(buffer, 0, bytesRead)
             }
         }
 

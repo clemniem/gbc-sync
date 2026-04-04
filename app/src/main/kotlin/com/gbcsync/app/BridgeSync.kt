@@ -43,89 +43,18 @@ class BridgeSync(
         destDir: File,
         deviceName: String,
     ) {
-        // Step 0: Quick scan to list device files for prefix matching
         syncState.value =
             SyncState(
                 status = SyncState.Status.CONNECTING,
                 deviceName = deviceName,
-                currentFile = "Scanning device files...",
+                currentFile = "Waiting for Bridge to boot...",
             )
 
-        val deviceFileIndex = mutableListOf<Triple<String, Long, UsbFile>>()
-        try {
-            storageDevice.init()
-            val partition = storageDevice.partitions.firstOrNull()
-            if (partition != null) {
-                val fs = partition.fileSystem
-                val allFiles = mutableListOf<Pair<UsbFile, String>>()
-                fileCopier.collectLibaumsFiles(fs.rootDirectory, "", config.fileFilter, config.recursive, allFiles)
-                for ((usbFile, relativePath) in allFiles) {
-                    val path = if (relativePath.isNotEmpty()) relativePath else usbFile.name
-                    deviceFileIndex.add(Triple(path, usbFile.length, usbFile))
-                }
-                deviceFileIndex.sortBy { it.first }
-                AppLog.i("[Bridge] Device has ${deviceFileIndex.size} files")
-            }
-            storageDevice.closeSafely()
-        } catch (e: Exception) {
-            AppLog.w("[Bridge] Quick scan failed: ${e.message}, proceeding with fresh folder")
-            storageDevice.closeSafely()
-        }
-
-        // Step 1: Find existing sync folder whose files are a prefix of the device files
-        val matchingFolder = findMatchingImportFolder(destDir, deviceFileIndex)
-        val importDir: File
-
-        if (matchingFolder != null) {
-            val existingFiles = matchingFolder.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.toList()
-            val existingPaths = existingFiles.map { it.relativeTo(matchingFolder).path }.toSet()
-            val newOnDevice = deviceFileIndex.count { (path, _, _) -> path !in existingPaths }
-
-            if (newOnDevice == 0) {
-                AppLog.i("[Bridge] All ${deviceFileIndex.size} files already in ${matchingFolder.name}, nothing to copy")
-                syncState.value =
-                    SyncState(
-                        status = SyncState.Status.DONE,
-                        deviceName = deviceName,
-                        targetFolder = matchingFolder.absolutePath,
-                        safeToDisconnect = true,
-                    )
-                return
-            }
-
-            AppLog.i("[Bridge] Found matching folder: ${matchingFolder.name} (${existingFiles.size} existing, $newOnDevice new)")
-            importChoiceDeferred = CompletableDeferred()
-            syncState.value =
-                syncState.value.copy(
-                    importChoice =
-                        ImportChoice(
-                            message = "${existingFiles.size} files already in \"${matchingFolder.name}\", $newOnDevice new to copy",
-                            appendLabel = "Append",
-                            newLabel = "Start New",
-                            autoAppendSeconds = 10,
-                        ),
-                )
-            val append = importChoiceDeferred!!.await()
-            if (append) {
-                importDir = matchingFolder
-                AppLog.i("[Bridge] Appending to: ${importDir.name}")
-            } else {
-                importDir = createImportFolder(destDir)
-            }
-        } else {
-            importDir = createImportFolder(destDir)
-        }
-
-        // Pre-populate with files already in import folder
+        // Import dir is resolved after first successful init (quick scan + folder matching).
+        // We avoid a separate init for the quick scan because double-init breaks RP2040/TinyUSB.
+        var importDir: File? = null
         val copyStartTime = System.currentTimeMillis()
         val copiedFiles = mutableSetOf<String>()
-        importDir.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.forEach { file ->
-            val rel = file.relativeTo(importDir).path
-            copiedFiles.add(rel)
-        }
-        if (copiedFiles.isNotEmpty()) {
-            AppLog.i("[Bridge] ${copiedFiles.size} files already in import folder")
-        }
         var totalFiles = 0
         var consecutiveInitFailures = 0
         val maxInitFailures = 3
@@ -196,9 +125,71 @@ class BridgeSync(
                     !copiedFiles.contains(fileName)
                 }
 
-            if (round == 1) {
-                totalFiles = newFiles.size + copiedFiles.size
-                AppLog.i("[Bridge] ${newFiles.size} file(s) to copy (${copiedFiles.size} already done)")
+            // On first successful init, resolve import dir via quick scan + folder matching
+            if (importDir == null) {
+                val deviceFileIndex = allFiles.map { (usbFile, relativePath) ->
+                    val path = if (relativePath.isNotEmpty()) relativePath else usbFile.name
+                    Triple(path, usbFile.length, usbFile)
+                }.sortedBy { it.first }
+                AppLog.i("[Bridge] Device has ${deviceFileIndex.size} files")
+
+                val matchingFolder = findMatchingImportFolder(destDir, deviceFileIndex)
+                if (matchingFolder != null) {
+                    val existingFiles = matchingFolder.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.toList()
+                    val existingPaths = existingFiles.map { it.relativeTo(matchingFolder).path }.toSet()
+                    val newOnDevice = deviceFileIndex.count { (path, _, _) -> path !in existingPaths }
+
+                    if (newOnDevice == 0) {
+                        AppLog.i("[Bridge] All ${deviceFileIndex.size} files already in ${matchingFolder.name}, nothing to copy")
+                        currentDevice.closeSafely()
+                        syncState.value =
+                            SyncState(
+                                status = SyncState.Status.DONE,
+                                deviceName = deviceName,
+                                targetFolder = matchingFolder.absolutePath,
+                                safeToDisconnect = true,
+                            )
+                        return
+                    }
+
+                    AppLog.i("[Bridge] Found matching folder: ${matchingFolder.name} (${existingFiles.size} existing, $newOnDevice new)")
+                    importChoiceDeferred = CompletableDeferred()
+                    syncState.value =
+                        syncState.value.copy(
+                            importChoice =
+                                ImportChoice(
+                                    message = "${existingFiles.size} files already in \"${matchingFolder.name}\", $newOnDevice new to copy",
+                                    appendLabel = "Append",
+                                    newLabel = "Start New",
+                                    autoAppendSeconds = 10,
+                                ),
+                        )
+                    val append = importChoiceDeferred!!.await()
+                    if (append) {
+                        importDir = matchingFolder
+                        AppLog.i("[Bridge] Appending to: ${importDir!!.name}")
+                    } else {
+                        importDir = createImportFolder(destDir)
+                    }
+                } else {
+                    importDir = createImportFolder(destDir)
+                }
+
+                // Pre-populate with files already in import folder
+                importDir!!.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.forEach { file ->
+                    copiedFiles.add(file.relativeTo(importDir!!).path)
+                }
+                if (copiedFiles.isNotEmpty()) {
+                    AppLog.i("[Bridge] ${copiedFiles.size} files already in import folder")
+                }
+
+                // Recompute new files after resolving import dir
+                val updatedNewFiles = allFiles.filter { (_, relativePath) ->
+                    val fileName = if (relativePath.isNotEmpty()) relativePath else return@filter true
+                    !copiedFiles.contains(fileName)
+                }
+                totalFiles = updatedNewFiles.size + copiedFiles.size
+                AppLog.i("[Bridge] ${updatedNewFiles.size} file(s) to copy (${copiedFiles.size} already done)")
             }
 
             if (newFiles.isEmpty()) {
@@ -227,9 +218,9 @@ class BridgeSync(
 
                 try {
                     AppLog.d("[Bridge] Copying $targetPath (${usbFile.length} bytes)...")
-                    fileCopier.copyLibaumsFile(usbFile, importDir, targetPath, chunkSize, fs, skipClose = true)
+                    fileCopier.copyLibaumsFile(usbFile, importDir!!, targetPath, chunkSize, fs)
 
-                    val destFile = File(importDir, targetPath)
+                    val destFile = File(importDir!!, targetPath)
                     if (destFile.length() == 0L && usbFile.length > 0) {
                         AppLog.w("[Bridge] $targetPath copied as 0 bytes, connection degraded")
                         destFile.delete()
@@ -246,7 +237,7 @@ class BridgeSync(
                 } catch (e: Exception) {
                     AppLog.w("[Bridge] Error copying $targetPath: ${e.message}")
                     try {
-                        File(importDir, targetPath).delete()
+                        File(importDir!!, targetPath).delete()
                     } catch (_: Exception) {
                     }
                     errorInRound = true
@@ -268,7 +259,7 @@ class BridgeSync(
 
         val remaining = totalFiles - copiedFiles.size
         val durationMs = System.currentTimeMillis() - copyStartTime
-        finishSync(syncState, repository, deviceName, copiedFiles.size, totalFiles, remaining, importDir.absolutePath, durationMs)
+        finishSync(syncState, repository, deviceName, copiedFiles.size, totalFiles, remaining, importDir?.absolutePath ?: "", durationMs)
         if (remaining > 0) {
             AppLog.w("[Bridge] Finished with $remaining file(s) remaining")
         } else {

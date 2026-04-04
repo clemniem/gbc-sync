@@ -18,6 +18,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.gbcsync.app.data.AppLog
 import com.gbcsync.app.data.SyncRepository
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
+import com.gbcsync.app.gifmaker.GifMakerScreen
 import com.gbcsync.app.ui.HomeScreen
 import com.gbcsync.app.ui.SettingsScreen
 import kotlinx.coroutines.flow.launchIn
@@ -95,10 +98,27 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 },
+                                onMakeGif = { path ->
+                                    if (path.isNotEmpty()) {
+                                        navController.navigate("gifmaker?path=${Uri.encode(path)}")
+                                    } else {
+                                        navController.navigate("gifmaker")
+                                    }
+                                },
                                 onContinueImport = { usbManager.onContinueImport() },
                                 onNewImport = { usbManager.onNewImport() },
                                 onCancelImport = { usbManager.onCancelImport() },
                                 onCameraChosen = { usbManager.onCameraChosen(it) },
+                            )
+                        }
+                        composable(
+                            "gifmaker?path={folderPath}",
+                            arguments = listOf(navArgument("folderPath") { type = NavType.StringType; defaultValue = "" }),
+                        ) { backStackEntry ->
+                            val folderPath = backStackEntry.arguments?.getString("folderPath") ?: ""
+                            GifMakerScreen(
+                                syncFolderPath = Uri.decode(folderPath),
+                                onNavigateBack = { navController.popBackStack() },
                             )
                         }
                         composable("settings") {

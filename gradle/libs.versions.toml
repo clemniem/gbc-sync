@@ -29,6 +29,9 @@ androidx-datastore-preferences = { group = "androidx.datastore", name = "datasto
 libaums-core = { group = "me.jahnen.libaums", name = "core", version.ref = "libaums" }
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 fat32lib = { group = "de.waldheinz", name = "fat32-lib", version.ref = "fat32lib" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version = "1.6.2" }
+androidx-test-core = { group = "androidx.test", name = "core", version = "1.6.1" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version = "1.2.1" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

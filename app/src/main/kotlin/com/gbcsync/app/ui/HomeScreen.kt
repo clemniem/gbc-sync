@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Usb
@@ -74,6 +75,7 @@ fun HomeScreen(
     onNavigateToSettings: () -> Unit,
     onOpenGbPrinterWeb: () -> Unit,
     onOpenFolder: (String) -> Unit = {},
+    onMakeGif: (String) -> Unit = {},
     onContinueImport: () -> Unit = {},
     onNewImport: () -> Unit = {},
     onCancelImport: () -> Unit = {},
@@ -86,6 +88,9 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("GBC Sync") },
                 actions = {
+                    IconButton(onClick = { onMakeGif("") }) {
+                        Icon(Icons.Default.Gif, contentDescription = "Make GIF")
+                    }
                     if (selectedTab == 1) {
                         IconButton(onClick = { AppLog.clear() }) {
                             Icon(Icons.Default.Delete, contentDescription = "Clear log")
@@ -170,6 +175,7 @@ fun HomeScreen(
                     onRetry = onRetrySync,
                     onOpenGbPrinterWeb = onOpenGbPrinterWeb,
                     onOpenFolder = onOpenFolder,
+                    onMakeGif = onMakeGif,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
 
@@ -317,6 +323,7 @@ private fun ConnectionStatusCard(
     onRetry: () -> Unit,
     onOpenGbPrinterWeb: () -> Unit,
     onOpenFolder: (String) -> Unit = {},
+    onMakeGif: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -461,6 +468,21 @@ private fun ConnectionStatusCard(
                             Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Open Folder")
+                        }
+                        if (syncState.deviceName.contains("PicNRec", ignoreCase = true) ||
+                            syncState.deviceName.contains("Bridge", ignoreCase = true)
+                        ) {
+                            Button(
+                                onClick = { onMakeGif(syncState.targetFolder) },
+                                colors =
+                                    ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                    ),
+                            ) {
+                                Icon(Icons.Default.Gif, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Make GIF")
+                            }
                         }
                     }
                     Button(

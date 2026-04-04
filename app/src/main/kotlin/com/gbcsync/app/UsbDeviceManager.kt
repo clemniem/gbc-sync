@@ -72,6 +72,8 @@ class UsbDeviceManager(
                     UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                         AppLog.d("USB device detached")
                         _connectedDevice.value = null
+                        // Cancel any pending import choice so the sync coroutine can finish
+                        bridgeSync.importChoiceDeferred?.complete(true)
                         if (_syncState.value.status != SyncState.Status.DONE) {
                             _syncState.value = SyncState()
                         }

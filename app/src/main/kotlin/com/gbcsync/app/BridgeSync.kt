@@ -273,7 +273,7 @@ class BridgeSync(
     ): File? {
         if (deviceFileIndex.isEmpty()) return null
 
-        val devicePaths = deviceFileIndex.map { it.first }.sorted()
+        val devicePaths = deviceFileIndex.map { it.first }.toSet()
 
         val syncFolders =
             destDir
@@ -288,18 +288,13 @@ class BridgeSync(
                     .walkTopDown()
                     .filter { it.isFile && !it.name.endsWith(".tmp") }
                     .map { it.relativeTo(folder).path }
-                    .sorted()
-                    .toList()
+                    .toSet()
 
             if (folderPaths.isEmpty()) continue
             if (folderPaths.size > devicePaths.size) continue
 
-            val isPrefix =
-                folderPaths.indices.all { i ->
-                    folderPaths[i] == devicePaths[i]
-                }
-
-            if (isPrefix) return folder
+            // Check that all files in the folder are a subset of the device files
+            if (devicePaths.containsAll(folderPaths)) return folder
         }
         return null
     }

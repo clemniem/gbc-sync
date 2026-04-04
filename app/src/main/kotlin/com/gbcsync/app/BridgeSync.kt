@@ -30,7 +30,7 @@ class BridgeSync(
         private val SYNC_FOLDER_REGEX = Regex("sync-\\d{3}")
     }
 
-    var importChoiceDeferred: CompletableDeferred<Boolean>? = null
+    var importChoiceDeferred: CompletableDeferred<Boolean?>? = null
 
     /**
      * PicNRec/2bitBridge sync flow.
@@ -119,12 +119,6 @@ class BridgeSync(
             val allFiles = mutableListOf<Pair<UsbFile, String>>()
             fileCopier.collectLibaumsFiles(fs.rootDirectory, "", config.fileFilter, config.recursive, allFiles)
 
-            val newFiles =
-                allFiles.filter { (_, relativePath) ->
-                    val fileName = if (relativePath.isNotEmpty()) relativePath else return@filter true
-                    !copiedFiles.contains(fileName)
-                }
-
             // On first successful init, resolve import dir via quick scan + folder matching
             if (importDir == null) {
                 val deviceFileIndex = allFiles.map { (usbFile, relativePath) ->
@@ -165,7 +159,12 @@ class BridgeSync(
                                 ),
                         )
                     val append = importChoiceDeferred!!.await()
-                    if (append) {
+                    if (append == null) {
+                        AppLog.i("[Bridge] Import cancelled by user")
+                        currentDevice.closeSafely()
+                        syncState.value = SyncState(status = SyncState.Status.IDLE)
+                        return
+                    } else if (append) {
                         importDir = matchingFolder
                         AppLog.i("[Bridge] Appending to: ${importDir!!.name}")
                     } else {
@@ -183,14 +182,16 @@ class BridgeSync(
                     AppLog.i("[Bridge] ${copiedFiles.size} files already in import folder")
                 }
 
-                // Recompute new files after resolving import dir
-                val updatedNewFiles = allFiles.filter { (_, relativePath) ->
+                totalFiles = allFiles.size
+            }
+
+            val newFiles =
+                allFiles.filter { (_, relativePath) ->
                     val fileName = if (relativePath.isNotEmpty()) relativePath else return@filter true
                     !copiedFiles.contains(fileName)
                 }
-                totalFiles = updatedNewFiles.size + copiedFiles.size
-                AppLog.i("[Bridge] ${updatedNewFiles.size} file(s) to copy (${copiedFiles.size} already done)")
-            }
+
+            AppLog.i("[Bridge] ${newFiles.size} file(s) to copy (${copiedFiles.size} already done, $totalFiles total)")
 
             if (newFiles.isEmpty()) {
                 AppLog.i("[Bridge] All files copied!")

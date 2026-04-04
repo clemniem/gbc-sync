@@ -76,6 +76,7 @@ fun HomeScreen(
     onOpenFolder: (String) -> Unit = {},
     onContinueImport: () -> Unit = {},
     onNewImport: () -> Unit = {},
+    onCancelImport: () -> Unit = {},
     onCameraChosen: (CameraType) -> Unit = {},
 ) {
     var selectedTab by remember { mutableIntStateOf(if (debugLogEnabled) 1 else 0) }
@@ -194,7 +195,7 @@ fun HomeScreen(
     // Import continuation dialog
     syncState.importChoice?.let { choice ->
         AlertDialog(
-            onDismissRequest = onNewImport,
+            onDismissRequest = onCancelImport,
             title = { Text("Continue Import?") },
             text = { Text(choice.message) },
             confirmButton = {
@@ -203,11 +204,19 @@ fun HomeScreen(
                 }
             },
             dismissButton = {
-                Button(
-                    onClick = onNewImport,
-                    colors = ButtonDefaults.textButtonColors(),
-                ) {
-                    Text(choice.newLabel)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = onCancelImport,
+                        colors = ButtonDefaults.textButtonColors(),
+                    ) {
+                        Text("Cancel")
+                    }
+                    Button(
+                        onClick = onNewImport,
+                        colors = ButtonDefaults.textButtonColors(),
+                    ) {
+                        Text(choice.newLabel)
+                    }
                 }
             },
         )

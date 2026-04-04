@@ -97,6 +97,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onContinueImport = { usbManager.onContinueImport() },
                                 onNewImport = { usbManager.onNewImport() },
+                                onCancelImport = { usbManager.onCancelImport() },
                                 onCameraChosen = { usbManager.onCameraChosen(it) },
                             )
                         }

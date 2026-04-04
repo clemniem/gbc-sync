@@ -55,6 +55,11 @@ class UsbDeviceManager(
         bridgeSync.importChoiceDeferred?.complete(false)
     }
 
+    fun onCancelImport() {
+        _syncState.value = _syncState.value.copy(importChoice = null)
+        bridgeSync.importChoiceDeferred?.complete(null)
+    }
+
     fun onCameraChosen(camera: CameraType) {
         _syncState.value = _syncState.value.copy(cameraChoice = null)
         joeyJrSync.cameraChoiceDeferred?.complete(camera)

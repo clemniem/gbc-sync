@@ -338,8 +338,8 @@ fun SettingsScreen(
                 )
             }
 
-            // Sync History section
-            item {
+            // Sync History section (only for devices with recursive sync, e.g. PicNRec/Bridge)
+            if (devices.any { it.recursive }) item {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 Text("Sync History", style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -349,7 +349,7 @@ fun SettingsScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                devices.forEach { device ->
+                devices.filter { it.recursive }.forEach { device ->
                     val count = syncedFileCounts[device.name] ?: 0
                     val nextNum = nextSyncNumbers[device.name] ?: 0
                     var syncNumText by remember(nextNum) { mutableStateOf(if (nextNum > 0) nextNum.toString() else "") }

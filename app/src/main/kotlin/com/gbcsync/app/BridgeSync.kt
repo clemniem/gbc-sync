@@ -52,8 +52,28 @@ class BridgeSync(
             )
 
         // Load persisted set of previously synced files (survives app restarts and file deletions)
-        val previouslySynced = repository.getSyncedFiles(deviceName)
+        var previouslySynced = repository.getSyncedFiles(deviceName)
         val newlySynced = mutableSetOf<String>()
+
+        // One-time migration: if history is empty but sync folders exist, populate from disk
+        if (previouslySynced.isEmpty()) {
+            val existingFiles = mutableSetOf<String>()
+            destDir.listFiles()
+                ?.filter { it.isDirectory && it.name.matches(SYNC_FOLDER_REGEX) }
+                ?.forEach { syncFolder ->
+                    syncFolder.walkTopDown()
+                        .filter { it.isFile && !it.name.endsWith(".tmp") }
+                        .forEach { file ->
+                            existingFiles.add(file.relativeTo(syncFolder).path)
+                        }
+                }
+            if (existingFiles.isNotEmpty()) {
+                repository.addSyncedFiles(deviceName, existingFiles)
+                previouslySynced = existingFiles
+                AppLog.i("[Bridge] Migrated ${existingFiles.size} existing files to sync history")
+            }
+        }
+
         AppLog.i("[Bridge] ${previouslySynced.size} files in sync history")
 
         // Import dir is resolved after first successful init (quick scan + folder matching).

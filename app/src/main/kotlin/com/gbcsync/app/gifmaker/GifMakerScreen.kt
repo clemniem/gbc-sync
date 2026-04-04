@@ -3,6 +3,9 @@ package com.gbcsync.app.gifmaker
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Environment
+import android.provider.Settings
+import android.net.Uri
 import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -78,7 +81,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import android.os.Environment
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.roundToInt
@@ -92,19 +94,20 @@ fun GifMakerScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // Request READ_MEDIA_IMAGES permission
+    // Request storage permissions
     var hasPermission by remember {
-        mutableStateOf(
-            context.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED,
-        )
+        mutableStateOf(Environment.isExternalStorageManager())
     }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted -> hasPermission = granted }
+    val manageStorageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { hasPermission = Environment.isExternalStorageManager() }
 
     LaunchedEffect(Unit) {
         if (!hasPermission) {
-            permissionLauncher.launch(Manifest.permission.READ_MEDIA_IMAGES)
+            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+            manageStorageLauncher.launch(intent)
         }
     }
 

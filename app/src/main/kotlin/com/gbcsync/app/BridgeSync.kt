@@ -55,23 +55,23 @@ class BridgeSync(
         var previouslySynced = repository.getSyncedFiles(deviceName)
         val newlySynced = mutableSetOf<String>()
 
-        // One-time migration: if history is empty but sync folders exist, populate from disk
-        if (previouslySynced.isEmpty()) {
-            val existingFiles = mutableSetOf<String>()
-            destDir.listFiles()
-                ?.filter { it.isDirectory && it.name.matches(SYNC_FOLDER_REGEX) }
-                ?.forEach { syncFolder ->
-                    syncFolder.walkTopDown()
-                        .filter { it.isFile && !it.name.endsWith(".tmp") }
-                        .forEach { file ->
-                            existingFiles.add(file.relativeTo(syncFolder).path)
-                        }
-                }
-            if (existingFiles.isNotEmpty()) {
-                repository.addSyncedFiles(deviceName, existingFiles)
-                previouslySynced = existingFiles
-                AppLog.i("[Bridge] Migrated ${existingFiles.size} existing files to sync history")
+        // Merge on-disk files into sync history (catches files from before history tracking)
+        val filterExt = config.fileFilter.removePrefix("*.").lowercase()
+        val onDiskFiles = mutableSetOf<String>()
+        destDir.listFiles()
+            ?.filter { it.isDirectory && it.name.matches(SYNC_FOLDER_REGEX) }
+            ?.forEach { syncFolder ->
+                syncFolder.walkTopDown()
+                    .filter { it.isFile && it.extension.lowercase() == filterExt }
+                    .forEach { file ->
+                        onDiskFiles.add(file.relativeTo(syncFolder).path)
+                    }
             }
+        val missingFromHistory = onDiskFiles - previouslySynced
+        if (missingFromHistory.isNotEmpty()) {
+            repository.addSyncedFiles(deviceName, missingFromHistory)
+            previouslySynced = previouslySynced + missingFromHistory
+            AppLog.i("[Bridge] Added ${missingFromHistory.size} on-disk files to sync history (total: ${previouslySynced.size})")
         }
 
         AppLog.i("[Bridge] ${previouslySynced.size} files in sync history")
@@ -153,7 +153,7 @@ class BridgeSync(
                 }.sortedBy { it.first }
                 AppLog.i("[Bridge] Device has ${deviceFileIndex.size} files")
 
-                val matchingFolder = findMatchingImportFolder(destDir, deviceFileIndex)
+                val matchingFolder = findMatchingImportFolder(destDir, deviceFileIndex, config.fileFilter)
                 if (matchingFolder != null) {
                     val existingFiles = matchingFolder.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.toList()
                     val existingPaths = existingFiles.map { it.relativeTo(matchingFolder).path }.toSet()
@@ -229,8 +229,8 @@ class BridgeSync(
                 SyncState(
                     status = SyncState.Status.SYNCING,
                     deviceName = deviceName,
-                    filesCopied = copiedFiles.size,
-                    totalFiles = totalFiles,
+                    filesCopied = newlySynced.size,
+                    totalFiles = newFiles.size + newlySynced.size,
                 )
 
             val chunkSize = fs.chunkSize
@@ -259,7 +259,7 @@ class BridgeSync(
                     newlySynced.add(originalPath)
                     copiedThisRound++
                     AppLog.d("[Bridge] Copied $targetPath OK (#$copiedThisRound this round, delay=${FILE_DELAY_MS}ms)")
-                    syncState.value = syncState.value.copy(filesCopied = copiedFiles.size)
+                    syncState.value = syncState.value.copy(filesCopied = newlySynced.size)
 
                     delay(FILE_DELAY_MS)
                 } catch (e: Exception) {
@@ -291,19 +291,22 @@ class BridgeSync(
             AppLog.i("[Bridge] Persisted ${newlySynced.size} new file(s) to sync history")
         }
 
-        val remaining = totalFiles - copiedFiles.size
         val durationMs = System.currentTimeMillis() - copyStartTime
-        finishSync(syncState, repository, deviceName, copiedFiles.size, totalFiles, remaining, importDir?.absolutePath ?: "", durationMs)
-        if (remaining > 0) {
-            AppLog.w("[Bridge] Finished with $remaining file(s) remaining")
+        val copied = newlySynced.size
+        val skipped = previouslySynced.size
+        val errors = totalFiles - copiedFiles.size - skipped
+        finishSync(syncState, repository, deviceName, copied, totalFiles, errors.coerceAtLeast(0), importDir?.absolutePath ?: "", durationMs)
+        if (errors > 0) {
+            AppLog.w("[Bridge] Finished with $errors file(s) remaining")
         } else {
-            AppLog.i("[Bridge] All $totalFiles file(s) synced successfully")
+            AppLog.i("[Bridge] Sync complete: $copied new, $skipped from history, ${copiedFiles.size} on disk")
         }
     }
 
     private fun findMatchingImportFolder(
         destDir: File,
         deviceFileIndex: List<Triple<String, Long, UsbFile>>,
+        fileFilter: String,
     ): File? {
         if (deviceFileIndex.isEmpty()) return null
 
@@ -316,18 +319,21 @@ class BridgeSync(
                 ?.sortedByDescending { it.name }
                 ?: return null
 
+        // Only compare files matching the sync filter (ignore GIFs, etc.)
+        val filterExt = fileFilter.removePrefix("*.").lowercase()
+
         for (folder in syncFolders) {
             val folderPaths =
                 folder
                     .walkTopDown()
-                    .filter { it.isFile && !it.name.endsWith(".tmp") }
+                    .filter { it.isFile && !it.name.endsWith(".tmp") && it.extension.lowercase() == filterExt }
                     .map { it.relativeTo(folder).path }
                     .toSet()
 
             if (folderPaths.isEmpty()) continue
             if (folderPaths.size > devicePaths.size) continue
 
-            // Check that all files in the folder are a subset of the device files
+            // Check that all synced files in the folder are a subset of the device files
             if (devicePaths.containsAll(folderPaths)) return folder
         }
         return null

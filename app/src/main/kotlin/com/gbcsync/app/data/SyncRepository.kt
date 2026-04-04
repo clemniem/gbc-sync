@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -85,6 +86,8 @@ class SyncRepository(
         val DEBUG_LOG_KEY = booleanPreferencesKey("debug_log_enabled")
         val OWNED_CAMERAS_KEY = stringPreferencesKey("owned_cameras")
         val BASE_FOLDER_KEY = stringPreferencesKey("base_folder")
+        val SYNCED_FILES_KEY = stringPreferencesKey("synced_files")
+        val NEXT_SYNC_NUMBER_KEY = stringPreferencesKey("next_sync_number")
         const val DEFAULT_BASE_FOLDER = "gbc-sync"
     }
 
@@ -198,6 +201,94 @@ class SyncRepository(
                 }
             val updated = (listOf(entry) + existing).take(100)
             prefs[SYNC_LOG_KEY] = gson.toJson(updated)
+        }
+    }
+
+    // --- Synced Files History ---
+    // Persists device file paths that have been successfully synced, keyed by device name.
+    // Format: JSON map of { "deviceName": ["path1", "path2", ...] }
+
+    suspend fun getSyncedFiles(deviceName: String): Set<String> {
+        val prefs = context.dataStore.data.first()
+        val json = prefs[SYNCED_FILES_KEY] ?: return emptySet()
+        return try {
+            val map: Map<String, List<String>> = gson.fromJson(json, object : TypeToken<Map<String, List<String>>>() {}.type)
+            map[deviceName]?.toSet() ?: emptySet()
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
+    fun syncedFilesFlow(deviceName: String): Flow<Set<String>> =
+        context.dataStore.data.map { prefs ->
+            val json = prefs[SYNCED_FILES_KEY] ?: return@map emptySet()
+            try {
+                val map: Map<String, List<String>> = gson.fromJson(json, object : TypeToken<Map<String, List<String>>>() {}.type)
+                map[deviceName]?.toSet() ?: emptySet()
+            } catch (_: Exception) {
+                emptySet()
+            }
+        }
+
+    suspend fun addSyncedFiles(deviceName: String, paths: Set<String>) {
+        context.dataStore.edit { prefs ->
+            val existing: MutableMap<String, List<String>> =
+                try {
+                    val json = prefs[SYNCED_FILES_KEY] ?: "{}"
+                    gson.fromJson(json, object : TypeToken<MutableMap<String, List<String>>>() {}.type)
+                } catch (_: Exception) {
+                    mutableMapOf()
+                }
+            val current = (existing[deviceName] ?: emptyList()).toMutableSet()
+            current.addAll(paths)
+            existing[deviceName] = current.toList()
+            prefs[SYNCED_FILES_KEY] = gson.toJson(existing)
+        }
+    }
+
+    suspend fun clearSyncedFiles(deviceName: String) {
+        context.dataStore.edit { prefs ->
+            val existing: MutableMap<String, List<String>> =
+                try {
+                    val json = prefs[SYNCED_FILES_KEY] ?: "{}"
+                    gson.fromJson(json, object : TypeToken<MutableMap<String, List<String>>>() {}.type)
+                } catch (_: Exception) {
+                    mutableMapOf()
+                }
+            existing.remove(deviceName)
+            prefs[SYNCED_FILES_KEY] = gson.toJson(existing)
+        }
+    }
+
+    // --- Next Sync Number ---
+    // Per-device configurable next sync folder number.
+
+    fun nextSyncNumber(deviceName: String): Flow<Int> =
+        context.dataStore.data.map { prefs ->
+            val json = prefs[NEXT_SYNC_NUMBER_KEY] ?: return@map 0
+            try {
+                val map: Map<String, Int> = gson.fromJson(json, object : TypeToken<Map<String, Int>>() {}.type)
+                map[deviceName] ?: 0
+            } catch (_: Exception) {
+                0
+            }
+        }
+
+    suspend fun setNextSyncNumber(deviceName: String, number: Int) {
+        context.dataStore.edit { prefs ->
+            val existing: MutableMap<String, Int> =
+                try {
+                    val json = prefs[NEXT_SYNC_NUMBER_KEY] ?: "{}"
+                    gson.fromJson(json, object : TypeToken<MutableMap<String, Int>>() {}.type)
+                } catch (_: Exception) {
+                    mutableMapOf()
+                }
+            if (number <= 0) {
+                existing.remove(deviceName)
+            } else {
+                existing[deviceName] = number
+            }
+            prefs[NEXT_SYNC_NUMBER_KEY] = gson.toJson(existing)
         }
     }
 

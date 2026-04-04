@@ -147,6 +147,24 @@ class MainActivity : ComponentActivity() {
                                         repository.setDebugLogEnabled(enabled)
                                     }
                                 },
+                                syncedFileCounts = devices.associate { device ->
+                                    val count by repository.syncedFilesFlow(device.name).collectAsState(initial = emptySet())
+                                    device.name to count.size
+                                },
+                                onClearSyncHistory = { deviceName ->
+                                    lifecycleScope.launch {
+                                        repository.clearSyncedFiles(deviceName)
+                                    }
+                                },
+                                nextSyncNumbers = devices.associate { device ->
+                                    val num by repository.nextSyncNumber(device.name).collectAsState(initial = 0)
+                                    device.name to num
+                                },
+                                onSetNextSyncNumber = { deviceName, number ->
+                                    lifecycleScope.launch {
+                                        repository.setNextSyncNumber(deviceName, number)
+                                    }
+                                },
                                 onNavigateBack = { navController.popBackStack() },
                             )
                         }

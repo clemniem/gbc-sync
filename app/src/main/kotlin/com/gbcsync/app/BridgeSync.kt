@@ -9,6 +9,7 @@ import com.gbcsync.app.data.SyncRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import me.jahnen.libaums.core.UsbMassStorageDevice
 import me.jahnen.libaums.core.fs.UsbFile
 import java.io.File
@@ -49,6 +50,11 @@ class BridgeSync(
                 deviceName = deviceName,
                 currentFile = "Waiting for Bridge to boot...",
             )
+
+        // Load persisted set of previously synced files (survives app restarts and file deletions)
+        val previouslySynced = repository.getSyncedFiles(deviceName)
+        val newlySynced = mutableSetOf<String>()
+        AppLog.i("[Bridge] ${previouslySynced.size} files in sync history")
 
         // Import dir is resolved after first successful init (quick scan + folder matching).
         // We avoid a separate init for the quick scan because double-init breaks RP2040/TinyUSB.
@@ -168,10 +174,10 @@ class BridgeSync(
                         importDir = matchingFolder
                         AppLog.i("[Bridge] Appending to: ${importDir!!.name}")
                     } else {
-                        importDir = createImportFolder(destDir)
+                        importDir = createImportFolder(destDir, deviceName)
                     }
                 } else {
-                    importDir = createImportFolder(destDir)
+                    importDir = createImportFolder(destDir, deviceName)
                 }
 
                 // Pre-populate with files already in import folder
@@ -188,10 +194,10 @@ class BridgeSync(
             val newFiles =
                 allFiles.filter { (_, relativePath) ->
                     val fileName = if (relativePath.isNotEmpty()) relativePath else return@filter true
-                    !copiedFiles.contains(fileName)
+                    !copiedFiles.contains(fileName) && !previouslySynced.contains(fileName)
                 }
 
-            AppLog.i("[Bridge] ${newFiles.size} file(s) to copy (${copiedFiles.size} already done, $totalFiles total)")
+            AppLog.i("[Bridge] ${newFiles.size} file(s) to copy (${copiedFiles.size} on disk, ${previouslySynced.size} in history, $totalFiles total)")
 
             if (newFiles.isEmpty()) {
                 AppLog.i("[Bridge] All files copied!")
@@ -230,6 +236,7 @@ class BridgeSync(
                     }
 
                     copiedFiles.add(originalPath)
+                    newlySynced.add(originalPath)
                     copiedThisRound++
                     AppLog.d("[Bridge] Copied $targetPath OK (#$copiedThisRound this round, delay=${FILE_DELAY_MS}ms)")
                     syncState.value = syncState.value.copy(filesCopied = copiedFiles.size)
@@ -256,6 +263,12 @@ class BridgeSync(
             AppLog.i(
                 "[Bridge] Round $round: $copiedThisRound copied this round, ${copiedFiles.size}/$totalFiles total, delay=${FILE_DELAY_MS}ms, reconnecting...",
             )
+        }
+
+        // Persist newly synced file paths for cross-session dedup
+        if (newlySynced.isNotEmpty()) {
+            repository.addSyncedFiles(deviceName, newlySynced)
+            AppLog.i("[Bridge] Persisted ${newlySynced.size} new file(s) to sync history")
         }
 
         val remaining = totalFiles - copiedFiles.size
@@ -300,8 +313,13 @@ class BridgeSync(
         return null
     }
 
-    private fun createImportFolder(destDir: File): File {
-        val nextNumber =
+    private suspend fun createImportFolder(destDir: File, deviceName: String): File {
+        val configuredNumber = repository.nextSyncNumber(deviceName).first()
+        val nextNumber = if (configuredNumber > 0) {
+            // Use configured number and clear it (one-shot)
+            repository.setNextSyncNumber(deviceName, 0)
+            configuredNumber
+        } else {
             (
                 destDir
                     .listFiles()
@@ -309,6 +327,7 @@ class BridgeSync(
                     ?.mapNotNull { it.name.removePrefix("sync-").toIntOrNull() }
                     ?.maxOrNull() ?: 0
             ) + 1
+        }
         val dir = File(destDir, "sync-%03d".format(nextNumber))
         dir.mkdirs()
         AppLog.i("[Bridge] New import folder: ${dir.name}")

@@ -1,6 +1,7 @@
 package com.gbcsync.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -56,6 +57,10 @@ fun SettingsScreen(
     onBaseFolderChanged: (String) -> Unit,
     debugLogEnabled: Boolean,
     onDebugLogEnabledChanged: (Boolean) -> Unit,
+    syncedFileCounts: Map<String, Int>,
+    onClearSyncHistory: (String) -> Unit,
+    nextSyncNumbers: Map<String, Int>,
+    onSetNextSyncNumber: (String, Int) -> Unit,
     onNavigateBack: () -> Unit,
 ) {
     Scaffold(
@@ -332,6 +337,63 @@ fun SettingsScreen(
                     },
                 )
             }
+
+            // Sync History section
+            item {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                Text("Sync History", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Files tracked as already synced (survives deletion from phone)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                devices.forEach { device ->
+                    val count = syncedFileCounts[device.name] ?: 0
+                    val nextNum = nextSyncNumbers[device.name] ?: 0
+                    var syncNumText by remember(nextNum) { mutableStateOf(if (nextNum > 0) nextNum.toString() else "") }
+
+                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(device.name, style = MaterialTheme.typography.titleSmall)
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "$count file${if (count != 1) "s" else ""} tracked",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                if (count > 0) {
+                                    Button(
+                                        onClick = { onClearSyncHistory(device.name) },
+                                        colors = ButtonDefaults.textButtonColors(),
+                                    ) {
+                                        Text("Clear History")
+                                    }
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = syncNumText,
+                                onValueChange = { text ->
+                                    syncNumText = text
+                                    val num = text.toIntOrNull() ?: 0
+                                    onSetNextSyncNumber(device.name, num)
+                                },
+                                label = { Text("Next Sync Folder #") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                supportingText = { Text("Leave empty for auto-increment") },
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -479,6 +541,10 @@ private fun SettingsScreenPreview() {
             onBaseFolderChanged = {},
             debugLogEnabled = true,
             onDebugLogEnabledChanged = {},
+            syncedFileCounts = mapOf("Joey Jr" to 0, "2bitBridge" to 1635),
+            onClearSyncHistory = {},
+            nextSyncNumbers = emptyMap(),
+            onSetNextSyncNumber = { _, _ -> },
             onNavigateBack = {},
         )
     }

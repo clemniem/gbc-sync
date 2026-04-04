@@ -56,7 +56,7 @@ class MainActivity : ComponentActivity() {
                     val syncLog by repository.syncLog.collectAsState(initial = emptyList())
                     val devices by repository.deviceConfigs.collectAsState(initial = emptyList())
                     val logLines by AppLog.lines.collectAsState()
-                    val debugLogEnabled by repository.debugLogEnabled.collectAsState(initial = false)
+                    val debugLogEnabled by repository.debugLogEnabled.collectAsState(initial = true)
                     val ownedCameras by repository.ownedCameras.collectAsState(initial = emptySet())
                     val baseFolder by repository.baseFolder.collectAsState(initial = "gbc-sync")
 

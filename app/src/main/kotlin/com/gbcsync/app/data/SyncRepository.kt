@@ -166,7 +166,7 @@ class SyncRepository(
 
     val debugLogEnabled: Flow<Boolean> =
         context.dataStore.data.map { prefs ->
-            prefs[DEBUG_LOG_KEY] ?: false
+            prefs[DEBUG_LOG_KEY] ?: true
         }
 
     suspend fun setDebugLogEnabled(enabled: Boolean) {

@@ -108,51 +108,59 @@ fun HomeScreen(
                     syncState.status == SyncState.Status.CONNECTING
 
             if (isSyncActive) {
-                // Expanded sync animation view
-                Spacer(modifier = Modifier.weight(1f))
-                SyncAnimation(
-                    progress = syncState.progress,
-                    isConnecting = syncState.status == SyncState.Status.CONNECTING,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text =
-                        when (syncState.status) {
-                            SyncState.Status.CONNECTING -> "Connecting to ${syncState.deviceName}..."
-                            SyncState.Status.SYNCING -> "Syncing from ${syncState.deviceName}..."
-                            else -> ""
-                        },
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (syncState.status == SyncState.Status.SYNCING && syncState.totalFiles > 0) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                // Sync animation in top half
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    SyncAnimation(
+                        progress = syncState.progress,
+                        isConnecting = syncState.status == SyncState.Status.CONNECTING,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "${syncState.filesCopied} / ${syncState.totalFiles}",
-                        style = MaterialTheme.typography.titleLarge,
+                        text =
+                            when (syncState.status) {
+                                SyncState.Status.CONNECTING -> "Connecting to ${syncState.deviceName}..."
+                                SyncState.Status.SYNCING -> "Syncing from ${syncState.deviceName}..."
+                                else -> ""
+                            },
+                        style = MaterialTheme.typography.titleMedium,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    if (syncState.status == SyncState.Status.SYNCING && syncState.totalFiles > 0) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${syncState.filesCopied} / ${syncState.totalFiles}",
+                            style = MaterialTheme.typography.titleLarge,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (syncState.currentFile.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = syncState.currentFile,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 32.dp),
+                        )
+                    }
                 }
-                if (syncState.currentFile.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = syncState.currentFile,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 32.dp),
-                    )
+                // Live log in bottom half during sync
+                if (debugLogEnabled) {
+                    LiveLogTab(logLines, modifier = Modifier.weight(1f))
                 }
-                Spacer(modifier = Modifier.weight(1f))
             } else {
                 // Normal view: status card + tabs
                 ConnectionStatusCard(
@@ -255,7 +263,7 @@ private fun SyncHistoryTab(syncLog: List<SyncLogEntry>) {
 }
 
 @Composable
-private fun LiveLogTab(logLines: List<String>) {
+private fun LiveLogTab(logLines: List<String>, modifier: Modifier = Modifier) {
     val listState = rememberLazyListState()
 
     // Auto-scroll to bottom when new lines arrive
@@ -268,7 +276,7 @@ private fun LiveLogTab(logLines: List<String>) {
     LazyColumn(
         state = listState,
         modifier =
-            Modifier
+            modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surfaceContainerLowest)
                 .padding(8.dp),

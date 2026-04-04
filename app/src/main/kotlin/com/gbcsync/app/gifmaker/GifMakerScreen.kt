@@ -36,11 +36,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.Loop
 import androidx.compose.material.icons.filled.Merge
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -153,6 +156,8 @@ fun GifMakerScreen(
     var excludedFrames by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var loopResult by remember { mutableStateOf<LoopResult?>(null) }
     var findingLoop by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var deleteTarget by remember { mutableStateOf<List<File>>(emptyList()) }
     var exporting by remember { mutableStateOf(false) }
     var exportedFile by remember { mutableStateOf<File?>(null) }
 
@@ -199,6 +204,12 @@ fun GifMakerScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = {
+                            deleteTarget = selectedIndices.sorted().flatMap { sequences[it].files }
+                            showDeleteConfirm = true
+                        }) {
+                            Icon(Icons.Default.Delete, "Delete selected")
+                        }
                         if (selectedIndices.size >= 2) {
                             IconButton(onClick = {
                                 val combined = selectedIndices.sorted().flatMap { sequences[it].files }
@@ -423,31 +434,106 @@ fun GifMakerScreen(
                     }
                 }
 
-                // Combine button at bottom when in selection mode
-                if (selectionMode && selectedIndices.size >= 2) {
+                // Action buttons when in selection mode
+                if (selectionMode && selectedIndices.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(12.dp))
+                    val totalFrames = selectedIndices.sorted().sumOf { sequences[it].files.size }
                     Button(
                         onClick = {
-                            val combined = selectedIndices.sorted().flatMap { sequences[it].files }
-                            val combinedSequence = ImageSequence(
-                                files = combined,
-                                firstFrameName = combined.first().nameWithoutExtension,
-                                lastFrameName = combined.last().nameWithoutExtension,
-                            )
-                            selectionMode = false
-                            selectedIndices = emptySet()
-                            selectedSequence = combinedSequence
-                            exportedFile = null
+                            deleteTarget = selectedIndices.sorted().flatMap { sequences[it].files }
+                            showDeleteConfirm = true
                         },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                        ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Icon(Icons.Default.Merge, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Combine ${selectedIndices.size} sequences (${selectedIndices.sorted().sumOf { sequences[it].files.size }} frames)")
+                        Text("Delete ${selectedIndices.size} sequence${if (selectedIndices.size != 1) "s" else ""} ($totalFrames frames)")
+                    }
+                    if (selectedIndices.size >= 2) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                val combined = selectedIndices.sorted().flatMap { sequences[it].files }
+                                val combinedSequence = ImageSequence(
+                                    files = combined,
+                                    firstFrameName = combined.first().nameWithoutExtension,
+                                    lastFrameName = combined.last().nameWithoutExtension,
+                                )
+                                selectionMode = false
+                                selectedIndices = emptySet()
+                                selectedSequence = combinedSequence
+                                exportedFile = null
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Default.Merge, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Combine ${selectedIndices.size} sequences ($totalFrames frames)")
+                        }
                     }
                 }
             }
         }
+    }
+
+    // Delete confirmation dialog
+    if (showDeleteConfirm && deleteTarget.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = {
+                showDeleteConfirm = false
+                deleteTarget = emptyList()
+            },
+            title = { Text("Delete Files?") },
+            text = {
+                Text("Permanently delete ${deleteTarget.size} file${if (deleteTarget.size != 1) "s" else ""} from the phone? This cannot be undone.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            var deleted = 0
+                            for (file in deleteTarget) {
+                                if (file.delete()) deleted++
+                            }
+                            withContext(Dispatchers.Main) {
+                                showDeleteConfirm = false
+                                deleteTarget = emptyList()
+                                selectionMode = false
+                                selectedIndices = emptySet()
+                                selectedSequence = null
+                                excludedFrames = emptySet()
+                                exportedFile = null
+                                // Re-detect sequences
+                                val folder = selectedFolder
+                                if (folder != null) {
+                                    detecting = true
+                                    sequences = SequenceDetector().detectSequences(folder)
+                                    detecting = false
+                                    if (sequences.size == 1) selectedSequence = sequences.first()
+                                }
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        deleteTarget = emptyList()
+                    },
+                    colors = ButtonDefaults.textButtonColors(),
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 

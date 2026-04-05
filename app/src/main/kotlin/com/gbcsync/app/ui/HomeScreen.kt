@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.UsbOff
@@ -76,6 +77,7 @@ fun HomeScreen(
     onOpenGbPrinterWeb: () -> Unit,
     onOpenFolder: (String) -> Unit = {},
     onMakeGif: (String) -> Unit = {},
+    onMakePalette: () -> Unit = {},
     onContinueImport: () -> Unit = {},
     onNewImport: () -> Unit = {},
     onCancelImport: () -> Unit = {},
@@ -90,6 +92,9 @@ fun HomeScreen(
                 actions = {
                     IconButton(onClick = { onMakeGif("") }) {
                         Icon(Icons.Default.Gif, contentDescription = "Make GIF")
+                    }
+                    IconButton(onClick = onMakePalette) {
+                        Icon(Icons.Default.Palette, contentDescription = "Palette Maker")
                     }
                     if (selectedTab == 1) {
                         IconButton(onClick = { AppLog.clear() }) {

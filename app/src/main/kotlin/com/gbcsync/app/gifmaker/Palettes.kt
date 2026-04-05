@@ -17,6 +17,10 @@ data class GbPalette(
         /** "Original" — use the image's own colors, no remapping. */
         val ORIGINAL = GbPalette("original", "Original (from image)", emptyList())
 
+        /** Convert stored palette hex strings to GbPalette. */
+        fun fromStored(shortName: String, name: String, hexColors: List<String>): GbPalette =
+            GbPalette(shortName, name, hexColors.map { hex(it) })
+
         val ALL: List<GbPalette> = listOf(
             ORIGINAL,
             p("bw", "Black & White", "#ffffff", "#aaaaaa", "#555555", "#000000"),

@@ -20,7 +20,9 @@ import com.gbcsync.app.data.AppLog
 import com.gbcsync.app.data.SyncRepository
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
+import com.gbcsync.app.gifmaker.GbPalette
 import com.gbcsync.app.gifmaker.GifMakerScreen
+import com.gbcsync.app.gifmaker.PaletteMakerScreen
 import com.gbcsync.app.ui.HomeScreen
 import com.gbcsync.app.ui.SettingsScreen
 import kotlinx.coroutines.flow.launchIn
@@ -105,6 +107,7 @@ class MainActivity : ComponentActivity() {
                                         navController.navigate("gifmaker")
                                     }
                                 },
+                                onMakePalette = { navController.navigate("palettemaker") },
                                 onContinueImport = { usbManager.onContinueImport() },
                                 onNewImport = { usbManager.onNewImport() },
                                 onCancelImport = { usbManager.onCancelImport() },
@@ -116,9 +119,40 @@ class MainActivity : ComponentActivity() {
                             arguments = listOf(navArgument("folderPath") { type = NavType.StringType; defaultValue = "" }),
                         ) { backStackEntry ->
                             val folderPath = backStackEntry.arguments?.getString("folderPath") ?: ""
+                            val storedPalettes by repository.customPalettes.collectAsState(initial = emptyList())
+                            val customPaletteList = storedPalettes.map { stored ->
+                                GbPalette.fromStored(stored.shortName, stored.name, stored.colors)
+                            }
                             GifMakerScreen(
                                 syncFolderPath = Uri.decode(folderPath),
+                                customPalettes = customPaletteList,
                                 onNavigateBack = { navController.popBackStack() },
+                            )
+                        }
+                        composable("palettemaker") {
+                            val storedPals by repository.customPalettes.collectAsState(initial = emptyList())
+                            val savedPaletteList = storedPals.map { stored ->
+                                GbPalette.fromStored(stored.shortName, stored.name, stored.colors)
+                            }
+                            PaletteMakerScreen(
+                                onNavigateBack = { navController.popBackStack() },
+                                onSavePalette = { palette ->
+                                    lifecycleScope.launch {
+                                        repository.saveCustomPalette(
+                                            SyncRepository.StoredPalette(
+                                                shortName = palette.shortName,
+                                                name = palette.name,
+                                                colors = palette.colors.map { "#%06x".format(it and 0x00FFFFFF) },
+                                            ),
+                                        )
+                                    }
+                                },
+                                savedPalettes = savedPaletteList,
+                                onDeletePalette = { shortName ->
+                                    lifecycleScope.launch {
+                                        repository.deleteCustomPalette(shortName)
+                                    }
+                                },
                             )
                         }
                         composable("settings") {

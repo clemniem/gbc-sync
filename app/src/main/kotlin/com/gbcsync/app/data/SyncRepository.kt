@@ -88,6 +88,7 @@ class SyncRepository(
         val BASE_FOLDER_KEY = stringPreferencesKey("base_folder")
         val SYNCED_FILES_KEY = stringPreferencesKey("synced_files")
         val NEXT_SYNC_NUMBER_KEY = stringPreferencesKey("next_sync_number")
+        val CUSTOM_PALETTES_KEY = stringPreferencesKey("custom_palettes")
         const val DEFAULT_BASE_FOLDER = "gbc-sync"
     }
 
@@ -289,6 +290,47 @@ class SyncRepository(
                 existing[deviceName] = number
             }
             prefs[NEXT_SYNC_NUMBER_KEY] = gson.toJson(existing)
+        }
+    }
+
+    // --- Custom Palettes ---
+
+    data class StoredPalette(val shortName: String, val name: String, val colors: List<String>)
+
+    val customPalettes: Flow<List<StoredPalette>> =
+        context.dataStore.data.map { prefs ->
+            val json = prefs[CUSTOM_PALETTES_KEY] ?: return@map emptyList()
+            try {
+                gson.fromJson(json, object : TypeToken<List<StoredPalette>>() {}.type)
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+
+    suspend fun saveCustomPalette(palette: StoredPalette) {
+        context.dataStore.edit { prefs ->
+            val existing: List<StoredPalette> =
+                try {
+                    val json = prefs[CUSTOM_PALETTES_KEY] ?: "[]"
+                    gson.fromJson(json, object : TypeToken<List<StoredPalette>>() {}.type)
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            val updated = existing.filter { it.shortName != palette.shortName } + palette
+            prefs[CUSTOM_PALETTES_KEY] = gson.toJson(updated)
+        }
+    }
+
+    suspend fun deleteCustomPalette(shortName: String) {
+        context.dataStore.edit { prefs ->
+            val existing: List<StoredPalette> =
+                try {
+                    val json = prefs[CUSTOM_PALETTES_KEY] ?: "[]"
+                    gson.fromJson(json, object : TypeToken<List<StoredPalette>>() {}.type)
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            prefs[CUSTOM_PALETTES_KEY] = gson.toJson(existing.filter { it.shortName != shortName })
         }
     }
 

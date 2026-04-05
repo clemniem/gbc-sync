@@ -157,10 +157,11 @@ class BridgeSync(
                 if (matchingFolder != null) {
                     val existingFiles = matchingFolder.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.toList()
                     val existingPaths = existingFiles.map { it.relativeTo(matchingFolder).path }.toSet()
-                    val newOnDevice = deviceFileIndex.count { (path, _, _) -> path !in existingPaths }
+                    val knownPaths = existingPaths + previouslySynced
+                    val newOnDevice = deviceFileIndex.count { (path, _, _) -> path !in knownPaths }
 
                     if (newOnDevice == 0) {
-                        AppLog.i("[Bridge] All ${deviceFileIndex.size} files already in ${matchingFolder.name}, nothing to copy")
+                        AppLog.i("[Bridge] All ${deviceFileIndex.size} files already synced (${existingPaths.size} on disk, ${previouslySynced.size} in history)")
                         currentDevice.closeSafely()
                         syncState.value =
                             SyncState(
@@ -172,13 +173,13 @@ class BridgeSync(
                         return
                     }
 
-                    AppLog.i("[Bridge] Found matching folder: ${matchingFolder.name} (${existingFiles.size} existing, $newOnDevice new)")
+                    AppLog.i("[Bridge] Found matching folder: ${matchingFolder.name} (${existingPaths.size} on disk, ${previouslySynced.size} in history, $newOnDevice new)")
                     importChoiceDeferred = CompletableDeferred()
                     syncState.value =
                         syncState.value.copy(
                             importChoice =
                                 ImportChoice(
-                                    message = "${existingFiles.size} files already in \"${matchingFolder.name}\", $newOnDevice new to copy",
+                                    message = "$newOnDevice new file${if (newOnDevice != 1) "s" else ""} to copy",
                                     appendLabel = "Append",
                                     newLabel = "Start New",
                                     autoAppendSeconds = 10,

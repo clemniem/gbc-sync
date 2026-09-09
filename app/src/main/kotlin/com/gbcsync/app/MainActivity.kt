@@ -23,6 +23,7 @@ import androidx.navigation.navArgument
 import com.gbcsync.app.gifmaker.GbPalette
 import com.gbcsync.app.gifmaker.GifMakerScreen
 import com.gbcsync.app.gifmaker.PaletteMakerScreen
+import com.gbcsync.app.gifmaker.PhotoPreviewScreen
 import com.gbcsync.app.ui.HomeScreen
 import com.gbcsync.app.ui.SettingsScreen
 import kotlinx.coroutines.flow.launchIn
@@ -123,10 +124,36 @@ class MainActivity : ComponentActivity() {
                             val customPaletteList = storedPalettes.map { stored ->
                                 GbPalette.fromStored(stored.shortName, stored.name, stored.colors)
                             }
+                            val pendingPhotoSelection by backStackEntry.savedStateHandle
+                                .getStateFlow<List<String>?>("selectedPhotoPaths", null)
+                                .collectAsState()
                             GifMakerScreen(
                                 syncFolderPath = Uri.decode(folderPath),
                                 customPalettes = customPaletteList,
+                                pendingPhotoSelection = pendingPhotoSelection,
+                                onPhotoSelectionConsumed = {
+                                    backStackEntry.savedStateHandle["selectedPhotoPaths"] = null
+                                },
+                                onRequestPhotoPreview = { path ->
+                                    navController.navigate("photopreview?path=${Uri.encode(path)}")
+                                },
                                 onNavigateBack = { navController.popBackStack() },
+                            )
+                        }
+                        composable(
+                            "photopreview?path={folderPath}",
+                            arguments = listOf(navArgument("folderPath") { type = NavType.StringType; defaultValue = "" }),
+                        ) { backStackEntry ->
+                            val folderPath = backStackEntry.arguments?.getString("folderPath") ?: ""
+                            PhotoPreviewScreen(
+                                folderPath = Uri.decode(folderPath),
+                                onNavigateBack = { navController.popBackStack() },
+                                onConfirmSelection = { selectedPaths ->
+                                    navController.previousBackStackEntry
+                                        ?.savedStateHandle
+                                        ?.set("selectedPhotoPaths", selectedPaths)
+                                    navController.popBackStack()
+                                },
                             )
                         }
                         composable("palettemaker") {

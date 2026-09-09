@@ -92,6 +92,9 @@ import kotlin.math.roundToInt
 fun GifMakerScreen(
     syncFolderPath: String,
     customPalettes: List<GbPalette> = emptyList(),
+    pendingPhotoSelection: List<String>? = null,
+    onPhotoSelectionConsumed: () -> Unit = {},
+    onRequestPhotoPreview: (String) -> Unit = {},
     onNavigateBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -196,24 +199,29 @@ fun GifMakerScreen(
         if (sequences.size == 1) selectedSequence = sequences.first()
     }
 
-    // Show every photo in the folder as one sequence so the user can pick which frames to
-    // use (via the filmstrip), bypassing similarity grouping.
+    // Hand off to the photo preview screen so the user can pick which photos to include,
+    // bypassing similarity grouping.
     val openAllPhotos: () -> Unit = {
-        val folder = selectedFolder
-        if (folder != null) {
-            scope.launch {
-                val all = SequenceDetector().allPhotos(folder)
-                if (all != null) {
-                    excludedFrames = emptySet()
-                    loopResult = null
-                    exportedFile = null
-                    selectionMode = false
-                    selectedIndices = emptySet()
-                    selectedSequence = all
-                }
-            }
-        }
+        selectedFolder?.let { onRequestPhotoPreview(it.absolutePath) }
         Unit
+    }
+
+    // Apply a photo selection returned from the preview screen as the active sequence.
+    LaunchedEffect(pendingPhotoSelection) {
+        val files = pendingPhotoSelection?.map(::File)
+        if (files != null && files.isNotEmpty()) {
+            excludedFrames = emptySet()
+            loopResult = null
+            exportedFile = null
+            selectionMode = false
+            selectedIndices = emptySet()
+            selectedSequence = ImageSequence(
+                files = files,
+                firstFrameName = files.first().nameWithoutExtension,
+                lastFrameName = files.last().nameWithoutExtension,
+            )
+        }
+        if (pendingPhotoSelection != null) onPhotoSelectionConsumed()
     }
 
     Scaffold(

@@ -20,7 +20,18 @@
       "Bash(~/Library/Android/sdk/platform-tools/adb devices:*)",
       "Bash(git add:*)",
       "Bash(./gradlew installDebug:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(./gradlew ktlintCheck)",
+      "Bash(./gradlew ktlintFormat)",
+      "Bash(./gradlew --rerun-tasks ktlintCheck)",
+      "Bash(./gradlew --rerun-tasks ktlintMainSourceSetCheck)",
+      "Bash(./gradlew --rerun-tasks ktlintCheck --stacktrace)",
+      "Bash(./gradlew --rerun-tasks ktlintCheck --info)",
+      "Bash(git:*)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.gbcsync.app.gifmaker.GifEncoderTest)",
+      "Bash(~/Library/Android/sdk/platform-tools/adb shell:*)",
+      "Bash(./gradlew compileDebugKotlin)"
     ]
   }
 }

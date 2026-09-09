@@ -81,22 +81,6 @@ class SequenceDetector(
     }
 
     /**
-     * Build a single sequence from every PNG in the folder (sorted by name), ignoring
-     * similarity grouping — lets the user pick from all photos, not just detected sequences.
-     */
-    suspend fun allPhotos(folder: File): ImageSequence? = withContext(Dispatchers.IO) {
-        val pngFiles = folder.listFiles { f -> f.extension.equals("png", ignoreCase = true) }
-            ?.sortedBy { it.name }
-            ?: return@withContext null
-        if (pngFiles.isEmpty()) return@withContext null
-        ImageSequence(
-            files = pngFiles,
-            firstFrameName = pngFiles.first().nameWithoutExtension,
-            lastFrameName = pngFiles.last().nameWithoutExtension,
-        )
-    }
-
-    /**
      * Find the best loop endpoint: the frame whose content best matches the first active frame.
      * Only considers frames past a minimum loop length (30% of active frames or 5, whichever is larger).
      */

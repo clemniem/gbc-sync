@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import me.jahnen.libaums.core.UsbMassStorageDevice
+import me.jahnen.libaums.core.fs.FileSystem
 import me.jahnen.libaums.core.fs.UsbFile
 import java.io.File
 
@@ -27,6 +28,7 @@ class BridgeSync(
         const val PRODUCT_ID = 51966
         private const val BOOT_DELAY_MS = 4000L
         private const val RECONNECT_DELAY_MS = 2000L
+        private const val RECONNECT_DELAY_MAX_MS = 10000L
         private const val FILE_DELAY_MS = 250L
         private val SYNC_FOLDER_REGEX = Regex("sync-\\d{3}")
     }
@@ -85,9 +87,19 @@ class BridgeSync(
         var consecutiveInitFailures = 0
         val maxInitFailures = 3
         var currentDevice = storageDevice
+        // Device relative paths still to copy after the first walk; drives targeted
+        // re-resolution on reconnect so we don't re-walk the whole tree each round.
+        var remainingPaths: List<String> = emptyList()
+        var noProgressStreak = 0
+        val maxNoProgress = 3
 
         for (round in 1..20) {
-            val waitMs = if (round == 1) BOOT_DELAY_MS else RECONNECT_DELAY_MS
+            val waitMs =
+                if (round == 1) {
+                    BOOT_DELAY_MS
+                } else {
+                    (RECONNECT_DELAY_MS * (noProgressStreak + 1)).coerceAtMost(RECONNECT_DELAY_MAX_MS)
+                }
             syncState.value =
                 SyncState(
                     status = SyncState.Status.CONNECTING,
@@ -142,13 +154,16 @@ class BridgeSync(
                 AppLog.i("[Bridge] Filesystem: ${fs.volumeLabel}, capacity=${fs.capacity}")
             }
 
-            val allFiles = mutableListOf<Pair<UsbFile, String>>()
-            fileCopier.collectLibaumsFiles(fs.rootDirectory, "", config.fileFilter, config.recursive, allFiles)
-
-            // On first successful init, resolve import dir via quick scan + folder matching
+            // On first successful init: full walk to resolve the import dir and build the
+            // work list. On reconnect rounds: re-resolve only the still-remaining files by
+            // path, so we don't re-walk the whole tree (less SCSI traffic on the fragile link).
+            val roundFiles: List<Pair<UsbFile, String>>
             if (importDir == null) {
+                val allFiles = mutableListOf<Pair<UsbFile, String>>()
+                fileCopier.collectLibaumsFiles(fs.rootDirectory, "", config.fileFilter, config.recursive, allFiles)
+
                 val deviceFileIndex = allFiles.map { (usbFile, relativePath) ->
-                    val path = if (relativePath.isNotEmpty()) relativePath else usbFile.name
+                    val path = flattenPath(if (relativePath.isNotEmpty()) relativePath else usbFile.name)
                     Triple(path, usbFile.length, usbFile)
                 }.sortedBy { it.first }
                 AppLog.i("[Bridge] Device has ${deviceFileIndex.size} files")
@@ -210,12 +225,30 @@ class BridgeSync(
                 }
 
                 totalFiles = allFiles.size
+                // remainingPaths keeps the device path (needed to re-search on reconnect);
+                // dedup compares by the flattened key.
+                remainingPaths =
+                    allFiles
+                        .map { it.second }
+                        .filter { flattenPath(it) !in copiedFiles && flattenPath(it) !in previouslySynced }
+                roundFiles = allFiles
+            } else {
+                var resolved = resolveRemaining(fs, remainingPaths)
+                if (resolved.isEmpty() && remainingPaths.isNotEmpty()) {
+                    AppLog.w("[Bridge] Targeted resolve found no files; falling back to full walk")
+                    val allFiles = mutableListOf<Pair<UsbFile, String>>()
+                    fileCopier.collectLibaumsFiles(fs.rootDirectory, "", config.fileFilter, config.recursive, allFiles)
+                    resolved = allFiles
+                }
+                AppLog.i("[Bridge] Round $round: re-resolved ${resolved.size} of ${remainingPaths.size} remaining file(s)")
+                roundFiles = resolved
             }
 
             val newFiles =
-                allFiles.filter { (_, relativePath) ->
-                    val fileName = if (relativePath.isNotEmpty()) relativePath else return@filter true
-                    !copiedFiles.contains(fileName) && !previouslySynced.contains(fileName)
+                roundFiles.filter { (usbFile, relativePath) ->
+                    val devicePath = if (relativePath.isNotEmpty()) relativePath else usbFile.name
+                    val key = flattenPath(devicePath)
+                    key !in copiedFiles && key !in previouslySynced
                 }
 
             AppLog.i("[Bridge] ${newFiles.size} file(s) to copy (${copiedFiles.size} on disk, ${previouslySynced.size} in history, $totalFiles total)")
@@ -241,7 +274,8 @@ class BridgeSync(
 
             for ((usbFile, relativePath) in newFiles) {
                 val originalPath = if (relativePath.isNotEmpty()) relativePath else usbFile.name
-                val targetPath = originalPath
+                // Flatten into the single import folder; this is also the dedup key.
+                val targetPath = flattenPath(originalPath)
                 syncState.value = syncState.value.copy(currentFile = targetPath)
 
                 try {
@@ -256,8 +290,8 @@ class BridgeSync(
                         break
                     }
 
-                    copiedFiles.add(originalPath)
-                    newlySynced.add(originalPath)
+                    copiedFiles.add(targetPath)
+                    newlySynced.add(targetPath)
                     copiedThisRound++
                     AppLog.d("[Bridge] Copied $targetPath OK (#$copiedThisRound this round, delay=${FILE_DELAY_MS}ms)")
                     syncState.value = syncState.value.copy(filesCopied = newlySynced.size)
@@ -276,9 +310,28 @@ class BridgeSync(
 
             currentDevice.closeSafely()
 
+            // Persist progress each productive round so an interrupted sync doesn't
+            // re-evaluate already-copied files on the next run.
+            if (copiedThisRound > 0 && newlySynced.isNotEmpty()) {
+                repository.addSyncedFiles(deviceName, newlySynced)
+            }
+
+            // Shrink the remaining work so each reconnect round does strictly less.
+            remainingPaths = remainingPaths.filter { flattenPath(it) !in copiedFiles }
+
             if (!errorInRound) {
                 AppLog.i("[Bridge] Round $round finished without errors (delay=${FILE_DELAY_MS}ms)")
                 break
+            }
+
+            if (copiedThisRound > 0) {
+                noProgressStreak = 0
+            } else {
+                noProgressStreak++
+                if (noProgressStreak >= maxNoProgress) {
+                    AppLog.e("[Bridge] $maxNoProgress consecutive rounds with no progress, giving up")
+                    break
+                }
             }
 
             AppLog.i(
@@ -302,6 +355,39 @@ class BridgeSync(
         } else {
             AppLog.i("[Bridge] Sync complete: $copied new, $skipped from history, ${copiedFiles.size} on disk")
         }
+    }
+
+    /**
+     * Flattens a device relative path into a single-folder filename, so imports never
+     * recreate the device's nested subfolders on disk. Deterministic (unlike a counter,
+     * which depends on enumeration order) and also the canonical dedup key everywhere
+     * (history, copiedFiles). Flat files (no separator) are returned unchanged, keeping
+     * pre-existing history and on-disk files compatible.
+     */
+    private fun flattenPath(path: String): String = path.replace('/', '_')
+
+    /**
+     * Re-resolve only the still-remaining files by path after a reconnect, instead of
+     * re-walking the entire directory tree. Avoids re-reading directory entries for
+     * already-synced files and shrinks per-round SCSI traffic on the fragile link.
+     */
+    private fun resolveRemaining(
+        fs: FileSystem,
+        paths: List<String>,
+    ): List<Pair<UsbFile, String>> {
+        val root = fs.rootDirectory
+        val result = mutableListOf<Pair<UsbFile, String>>()
+        for (path in paths) {
+            try {
+                val file = root.search(path)
+                if (file != null && !file.isDirectory) {
+                    result.add(file to path)
+                }
+            } catch (e: Exception) {
+                AppLog.w("[Bridge] Failed to resolve $path on reconnect: ${e.message}")
+            }
+        }
+        return result
     }
 
     private fun findMatchingImportFolder(

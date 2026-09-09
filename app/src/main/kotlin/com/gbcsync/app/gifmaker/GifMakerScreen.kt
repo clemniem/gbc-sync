@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.Loop
 import androidx.compose.material.icons.filled.Merge
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -55,6 +56,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -89,6 +91,7 @@ import kotlin.math.roundToInt
 @Composable
 fun GifMakerScreen(
     syncFolderPath: String,
+    customPalettes: List<GbPalette> = emptyList(),
     onNavigateBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -191,6 +194,26 @@ fun GifMakerScreen(
         sequences = SequenceDetector().detectSequences(folder)
         detecting = false
         if (sequences.size == 1) selectedSequence = sequences.first()
+    }
+
+    // Show every photo in the folder as one sequence so the user can pick which frames to
+    // use (via the filmstrip), bypassing similarity grouping.
+    val openAllPhotos: () -> Unit = {
+        val folder = selectedFolder
+        if (folder != null) {
+            scope.launch {
+                val all = SequenceDetector().allPhotos(folder)
+                if (all != null) {
+                    excludedFrames = emptySet()
+                    loopResult = null
+                    exportedFile = null
+                    selectionMode = false
+                    selectedIndices = emptySet()
+                    selectedSequence = all
+                }
+            }
+        }
+        Unit
     }
 
     Scaffold(
@@ -317,6 +340,7 @@ fun GifMakerScreen(
                     fps = fps,
                     scale = scale,
                     palette = selectedPalette,
+                    customPalettes = customPalettes,
                     exporting = exporting,
                     exportedFile = exportedFile,
                     onFpsChanged = { fps = it },
@@ -388,11 +412,19 @@ fun GifMakerScreen(
                 )
             } else if (sequences.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No video sequences detected in this folder.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "No video sequences detected in this folder.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(onClick = openAllPhotos) {
+                            Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Show all photos")
+                        }
+                    }
                 }
             } else {
                 // Sequence list
@@ -404,6 +436,14 @@ fun GifMakerScreen(
                     },
                     style = MaterialTheme.typography.titleMedium,
                 )
+                if (!selectionMode) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(onClick = openAllPhotos, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Show all photos")
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     itemsIndexed(sequences) { index, seq ->
@@ -633,6 +673,7 @@ private fun SequenceDetail(
     fps: Float,
     scale: Int,
     palette: GbPalette,
+    customPalettes: List<GbPalette>,
     exporting: Boolean,
     exportedFile: File?,
     onFpsChanged: (Float) -> Unit,
@@ -835,8 +876,9 @@ private fun SequenceDetail(
                     .height(160.dp)
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh),
             ) {
-                items(GbPalette.ALL.size) { i ->
-                    val p = GbPalette.ALL[i]
+                val allPalettes = GbPalette.ALL + customPalettes
+                items(allPalettes.size) { i ->
+                    val p = allPalettes[i]
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
